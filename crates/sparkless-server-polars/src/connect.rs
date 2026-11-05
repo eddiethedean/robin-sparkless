@@ -27,8 +27,8 @@ pub use sparkless_server_connect::{
     status_with_standard_details,
 };
 use sparkless_server_core::{
-    ConnectExecutionPort, ConnectExecutionRequest, ConnectExecutionResult,
-    ConnectOperationIdentity, EngineSessionHandle, ExecutionError,
+    ConnectCommand, ConnectExecutionPlan, ConnectExecutionPort, ConnectExecutionRequest,
+    ConnectExecutionResult, ConnectOperationIdentity, EngineSessionHandle, ExecutionError,
 };
 use std::collections::HashMap;
 use std::future::Future;
@@ -62,6 +62,16 @@ impl ConnectExecutionPort for PolarsConnectExecution {
                 message: "the session handle is not owned by the Polars execution adapter".into(),
                 details: None,
             })?;
+        if matches!(
+            &request.plan,
+            ConnectExecutionPlan::Command(ConnectCommand::SqlQuery { .. })
+        ) {
+            return Ok(ConnectExecutionResult {
+                schema: None,
+                batches: ArrowIpcBatchStream::new(std::iter::empty()),
+                sql_command_result: None,
+            });
+        }
         session.sync_thread_context();
         let translated =
             plan::translate_plan_for_execution(session, &request.plan, &request.cancellation)
@@ -118,6 +128,7 @@ impl ConnectExecutionPort for PolarsConnectExecution {
         Ok(ConnectExecutionResult {
             schema: Some(result_schema),
             batches,
+            sql_command_result: None,
         })
     }
 }
@@ -1332,6 +1343,27 @@ fn start_connect_producer(
                     return;
                 }
                 None => {}
+            }
+            if let Some(relation) = translated.sql_command_result.as_ref() {
+                let response = connect_proto::ExecutePlanResponse {
+                    session_id: client_session_id.clone(),
+                    server_side_session_id: server_side_session_id.clone(),
+                    operation_id: operation_id.clone(),
+                    response_id: Uuid::new_v4().to_string(),
+                    metrics: None,
+                    observed_metrics: Vec::new(),
+                    schema: None,
+                    response_type: Some(
+                        connect_proto::execute_plan_response::ResponseType::SqlCommandResult(
+                            connect_proto::execute_plan_response::SqlCommandResult {
+                                relation: Some(normalize::materialize_relation(relation)),
+                            },
+                        ),
+                    ),
+                };
+                if !sender.send(Ok(response), &operation) {
+                    return;
+                }
             }
             if reattachable {
                 let response = connect_proto::ExecutePlanResponse {

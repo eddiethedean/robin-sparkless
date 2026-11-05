@@ -47,6 +47,60 @@ tag interruption, session-release cancellation, enriched error lookup, duplicate
 capacity/accounting behavior; these focused checks do not pass V21/V22 as an integrated gate.
 Stop the listener with Ctrl-C when finished.
 
+## Phase 4.20 DuckDB execution smoke
+
+This local integration exercise uses the pinned, unmodified `pyspark-client==4.0.5` client, a
+native `sparkless-server-duckdb` binary, and `duckdb==1.5.1`. It checks the public SQL/DataFrame
+subset, command result handling through `.collect()`, sequential reads and writes through the
+standalone DuckDB client, and visibility after restarting Sparkless against the same database.
+The local database is opened by one writable process at a time; this is not the shared Quack
+owner concurrency or Spark-reference matrix required by V37/V38.
+
+Build the local server and run the smoke from an environment with the DuckDB and Connect test
+dependencies installed:
+
+```sh
+cargo build -p sparkless-server-duckdb --no-default-features --features http,connect
+uv pip sync --python /tmp/sparkless-connect-client-py311/bin/python \
+  tests/connect/client-py311.lock tests/connect/duckdb-source-py311.lock
+PYTHONPATH=python/server-duckdb:python/connect \
+  /tmp/sparkless-connect-client-py311/bin/python \
+  tests/connect/smoke_phase420_duckdb_execution.py \
+  --server-bin target/debug/sparkless-server-duckdb
+```
+
+The script creates a temporary database and removes it on exit. Its pass is local interoperability
+evidence; it does not close the result/schema matrix, transaction fault injection, or shared-owner
+gates.
+
+## Phase 4.20 Spark result and schema comparison
+
+Use the pinned Apache Spark 4.0.5 distribution and the ordinary
+`pyspark-client==4.0.5` dependency environment from the smoke instructions. This runner sends the
+same public DataFrame and SQL workloads to Sparkless DuckDB and Apache Spark, compares full
+logical schemas and positional row multisets, and requires sanitized DuckDB engine witness events
+for successful reads and committed writes. Its fixtures cover ranges, empty results, nullable
+local relations, metadata-bearing aliases, grouped integer/decimal count and sum, joins, SQL reads
+and writes, scalar/decimal/integer/timestamp boundaries, and a table created by a standalone
+DuckDB client. It also checks that SQL ordering, SQL table functions, and left outer joins are
+rejected with their documented explanations.
+
+```sh
+PYTHONPATH=python/server-duckdb:python/connect \
+  /tmp/sparkless-connect-client-py311/bin/python \
+  tests/connect/differential_phase420_duckdb.py \
+  --spark-home /tmp/sparkless-oracle \
+  --spark-archive /tmp/spark-4.0.5-bin-hadoop3-connect.tgz \
+  --server-bin target/debug/sparkless-server-duckdb \
+  --output target/connect-phase420/differential.json
+```
+
+The report records client/reference/runtime versions, platform, pinned archive and candidate
+binary/runner hashes, settings, matched schemas/results, rejection cases, and DuckDB query/write
+witness counts. The test starts Spark in a temporary warehouse and stops its process group on both
+pass and failure. This selected local comparison does not close the full V37 matrix or the V38
+owner-failure/lifecycle gates.
+
 ## Slice 6 integrated conformance
 
 The integrated runner builds and launches a native release executable with HTTP and Connect on

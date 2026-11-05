@@ -104,6 +104,8 @@ pub struct ConnectExecutionResult {
     /// Logical output schema. Effect-only commands have no Arrow result.
     pub schema: Option<StructType>,
     pub batches: ArrowIpcBatchStream,
+    /// Opaque result relation returned after a SQL command has completed.
+    pub sql_command_result: Option<ConnectRelation>,
 }
 
 /// Transport-neutral plan received by the Connect execution adapter.
@@ -116,7 +118,13 @@ pub enum ConnectExecutionPlan {
 
 #[derive(Debug, Clone)]
 pub enum ConnectCommand {
-    Sql { sql: String },
+    Sql {
+        sql: String,
+    },
+    /// A lazy SQL query received through the `SqlCommand.input` preflight request.
+    SqlQuery {
+        sql: String,
+    },
     Unsupported(String),
 }
 

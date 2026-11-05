@@ -6,7 +6,7 @@ use crate::config::{
 use crate::connection::{configure_connection, duckdb_failure, quack_connection_id};
 use crate::scan::{encode_batch, quote_identifier, quote_literal};
 use crate::snapshot::{CancellationWatchdog, QuackCancellation};
-use arrow60::datatypes::{DataType as ArrowDataType, TimeUnit};
+use arrow60::datatypes::{DataType as ArrowDataType, Schema as ArrowSchema, TimeUnit};
 use duckdb::Connection;
 use duckdb::arrow::ipc::reader::StreamReader;
 use duckdb::vtab::arrow::{ArrowBatchRegistration, ArrowVTab};
@@ -17,7 +17,7 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 const EXECUTION_CATALOG: &str = "__sparkless_execution";
 const EXECUTION_RECEIPTS_SCHEMA: &str = "__sparkless_meta";
@@ -241,6 +241,7 @@ impl DuckDbExecutionOwner {
             sql,
             &[],
             &[],
+            None,
             0,
             0,
             0,
@@ -259,6 +260,7 @@ impl DuckDbExecutionOwner {
         sql: &str,
         inputs: &[Vec<u8>],
         expected_input_schemas: &[Option<StructType>],
+        expected_output_schema: Option<&StructType>,
         max_input_bytes: usize,
         max_input_rows: usize,
         max_input_decoded_bytes: usize,
@@ -375,10 +377,18 @@ impl DuckDbExecutionOwner {
             statement.stream_arrow(bindings.as_slice())
         }
         .map_err(|error| self.failure(error))?;
-        let arrow_schema = batches.get_schema().clone();
-        let schema = arrow_schema_to_spark(&arrow_schema)?;
+        let mut arrow_schema = batches.get_schema().clone();
+        let schema = if let Some(expected_schema) = expected_output_schema {
+            validate_output_data_types(&arrow_schema, expected_schema)?;
+            arrow_schema = rename_output_fields(&arrow_schema, expected_schema)?;
+            expected_schema.clone()
+        } else {
+            arrow_schema_to_spark(&arrow_schema)?
+        };
         on_schema(schema)?;
         let mut emitted_batch = false;
+        let mut witness_rows = 0usize;
+        let mut witness_batches = 0usize;
         for batch in &mut batches {
             token.check_cancelled()?;
             let batch = batch.map_err(|error| self.failure(error))?;
@@ -388,6 +398,19 @@ impl DuckDbExecutionOwner {
                     batch.num_rows()
                 )));
             }
+            let batch = if expected_output_schema.is_some() {
+                duckdb::arrow::record_batch::RecordBatch::try_new(
+                    arrow_schema.clone(),
+                    batch.columns().to_vec(),
+                )
+                .map_err(|error| {
+                    EngineError::internal(format!(
+                        "cannot apply Spark Connect output schema to DuckDB Arrow batch: {error}"
+                    ))
+                })?
+            } else {
+                batch
+            };
             let bytes = encode_batch(&batch)?;
             if bytes.len() > max_batch_bytes {
                 return Err(EngineError::invalid_input(format!(
@@ -398,6 +421,8 @@ impl DuckDbExecutionOwner {
                 bytes,
                 row_count: batch.num_rows() as u64,
             })?;
+            witness_rows = witness_rows.saturating_add(batch.num_rows());
+            witness_batches = witness_batches.saturating_add(1);
             emitted_batch = true;
         }
         if !emitted_batch {
@@ -412,8 +437,10 @@ impl DuckDbExecutionOwner {
                 bytes,
                 row_count: 0,
             })?;
+            witness_batches = 1;
         }
         token.check_cancelled()?;
+        trace_execution_witness("query", "completed", witness_rows, witness_batches);
         Ok(())
     }
 
@@ -462,6 +489,7 @@ impl DuckDbExecutionOwner {
                         .into(),
                 ));
             }
+            trace_execution_witness("write", "replayed", 0, 0);
             return Ok(DuckDbTransactionOutcome::Replayed);
         }
         let receipt_count =
@@ -531,6 +559,7 @@ impl DuckDbExecutionOwner {
                 self.redact(&error.to_string())
             ))
         })?;
+        trace_execution_witness("write", "committed", 0, 0);
         Ok(DuckDbTransactionOutcome::Committed)
     }
 
@@ -665,6 +694,14 @@ fn open_execution_connection(owner: &ConfiguredOwner) -> Result<Connection, Engi
         .register_table_function::<ArrowVTab>("arrow")
         .map_err(duckdb_failure)?;
     Ok(connection)
+}
+
+fn trace_execution_witness(operation: &str, outcome: &str, rows: usize, batches: usize) {
+    if std::env::var_os("SPARKLESS_CONNECT_TRACE").as_deref() == Some(std::ffi::OsStr::new("1")) {
+        eprintln!(
+            "connect_trace event=duckdb_execution_witness engine=duckdb operation={operation} outcome={outcome} rows={rows} batches={batches}"
+        );
+    }
 }
 
 fn initialize_receipt_ledger(
@@ -907,6 +944,73 @@ mod tests {
     }
 }
 
+fn validate_output_data_types(
+    actual: &arrow60::datatypes::SchemaRef,
+    expected: &StructType,
+) -> Result<(), EngineError> {
+    if actual.fields().len() != expected.logical_fields().len() {
+        return Err(EngineError::internal(
+            "DuckDB output width does not match the validated Spark Connect schema".into(),
+        ));
+    }
+    for (actual_field, expected_field) in actual.fields().iter().zip(expected.logical_fields()) {
+        let actual_type =
+            serde_json::to_value(arrow_field_to_spark_type(actual_field.data_type())?).map_err(
+                |error| EngineError::internal(format!("cannot encode DuckDB output type: {error}")),
+            )?;
+        let expected_type = serde_json::to_value(&expected_field.data_type).map_err(|error| {
+            EngineError::internal(format!("cannot encode Spark Connect output type: {error}"))
+        })?;
+        if actual_type != expected_type {
+            return Err(EngineError::internal(
+                "DuckDB output type does not match the validated Spark Connect schema".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn rename_output_fields(
+    actual: &arrow60::datatypes::SchemaRef,
+    expected: &StructType,
+) -> Result<arrow60::datatypes::SchemaRef, EngineError> {
+    if actual.fields().len() != expected.logical_fields().len() {
+        return Err(EngineError::internal(
+            "DuckDB output width does not match the validated Spark Connect schema".into(),
+        ));
+    }
+    let fields = actual
+        .fields()
+        .iter()
+        .zip(expected.logical_fields())
+        .map(|(field, expected)| {
+            let metadata = expected
+                .metadata
+                .iter()
+                .map(|(key, value)| {
+                    serde_json::to_string(value)
+                        .map(|value| (key.clone(), value))
+                        .map_err(|error| {
+                            EngineError::internal(format!(
+                                "cannot encode Spark Connect field metadata: {error}"
+                            ))
+                        })
+                })
+                .collect::<Result<std::collections::HashMap<_, _>, _>>()?;
+            Ok(field
+                .as_ref()
+                .clone()
+                .with_name(expected.name.clone())
+                .with_nullable(expected.nullable)
+                .with_metadata(metadata))
+        })
+        .collect::<Result<Vec<_>, EngineError>>()?;
+    Ok(Arc::new(ArrowSchema::new_with_metadata(
+        fields,
+        actual.metadata().clone(),
+    )))
+}
+
 fn arrow_schema_to_spark(
     schema: &arrow60::datatypes::SchemaRef,
 ) -> Result<StructType, EngineError> {
@@ -914,41 +1018,7 @@ fn arrow_schema_to_spark(
         .fields()
         .iter()
         .map(|field| {
-            let data_type = match field.data_type() {
-                ArrowDataType::Utf8 | ArrowDataType::LargeUtf8 => DataType::String,
-                ArrowDataType::Boolean => DataType::Boolean,
-                ArrowDataType::Int8 => DataType::Byte,
-                ArrowDataType::Int16 => DataType::Short,
-                ArrowDataType::Int32 => DataType::Integer,
-                ArrowDataType::Int64 => DataType::Long,
-                ArrowDataType::Float32 => DataType::Float,
-                ArrowDataType::Float64 => DataType::Double,
-                ArrowDataType::Date32 => DataType::Date,
-                ArrowDataType::Timestamp(TimeUnit::Microsecond, Some(_)) => DataType::Timestamp,
-                ArrowDataType::Timestamp(TimeUnit::Microsecond, None) => DataType::TimestampNtz,
-                ArrowDataType::Decimal128(precision, scale) => {
-                    let precision = u8::try_from(*precision).map_err(|_| {
-                        EngineError::invalid_input(
-                            "DuckDB decimal precision is out of range".into(),
-                        )
-                    })?;
-                    let scale = u8::try_from(*scale).map_err(|_| {
-                        EngineError::invalid_input("DuckDB decimal scale is out of range".into())
-                    })?;
-                    if precision == 0 || precision > 38 || scale > precision {
-                        return Err(EngineError::invalid_input(
-                            "DuckDB decimal precision/scale is outside the Spark range".into(),
-                        ));
-                    }
-                    DataType::Decimal(precision, scale)
-                }
-                ArrowDataType::Binary | ArrowDataType::LargeBinary => DataType::Binary,
-                other => {
-                    return Err(EngineError::invalid_input(format!(
-                        "DuckDB result type {other} is outside the initial Connect type set"
-                    )));
-                }
-            };
+            let data_type = arrow_field_to_spark_type(field.data_type())?;
             let metadata = field
                 .metadata()
                 .iter()
@@ -967,4 +1037,40 @@ fn arrow_schema_to_spark(
         })
         .collect::<Result<Vec<_>, EngineError>>()?;
     Ok(StructType::from_logical_fields(fields))
+}
+
+fn arrow_field_to_spark_type(arrow_type: &ArrowDataType) -> Result<DataType, EngineError> {
+    Ok(match arrow_type {
+        ArrowDataType::Utf8 | ArrowDataType::LargeUtf8 => DataType::String,
+        ArrowDataType::Boolean => DataType::Boolean,
+        ArrowDataType::Int8 => DataType::Byte,
+        ArrowDataType::Int16 => DataType::Short,
+        ArrowDataType::Int32 => DataType::Integer,
+        ArrowDataType::Int64 => DataType::Long,
+        ArrowDataType::Float32 => DataType::Float,
+        ArrowDataType::Float64 => DataType::Double,
+        ArrowDataType::Date32 => DataType::Date,
+        ArrowDataType::Timestamp(TimeUnit::Microsecond, Some(_)) => DataType::Timestamp,
+        ArrowDataType::Timestamp(TimeUnit::Microsecond, None) => DataType::TimestampNtz,
+        ArrowDataType::Decimal128(precision, scale) => {
+            let precision = u8::try_from(*precision).map_err(|_| {
+                EngineError::invalid_input("DuckDB decimal precision is out of range".into())
+            })?;
+            let scale = u8::try_from(*scale).map_err(|_| {
+                EngineError::invalid_input("DuckDB decimal scale is out of range".into())
+            })?;
+            if precision == 0 || precision > 38 || scale > precision {
+                return Err(EngineError::invalid_input(
+                    "DuckDB decimal precision/scale is outside the Spark range".into(),
+                ));
+            }
+            DataType::Decimal(precision, scale)
+        }
+        ArrowDataType::Binary | ArrowDataType::LargeBinary => DataType::Binary,
+        other => {
+            return Err(EngineError::invalid_input(format!(
+                "DuckDB result type {other} is outside the initial Connect type set"
+            )));
+        }
+    })
 }

@@ -61,9 +61,20 @@ limits. In DuckDB mode, the Connect adapter currently accepts:
   including `USING`, and grouped `count`/`sum`;
 - one parsed, read-only `SELECT` relation using literals, identifiers, unary and
   binary operators, `COUNT`, `SUM`, and `ABS`; simple `*` and `alias.*`
-  projections; supported `WHERE` expressions; expression `GROUP BY`; inner
+  projections; supported `WHERE` expressions including `IS NULL` and
+  `IS NOT NULL`; expression `GROUP BY`; inner
   equality/`USING` joins and `CROSS JOIN`; and a nonnegative integer `LIMIT`;
-- `CREATE TABLE` with explicitly typed columns and `INSERT INTO ... VALUES`.
+- `CREATE TABLE` with explicitly typed columns and `INSERT INTO ... VALUES`
+  using scalar literals; timestamp string values may use an explicit
+  `CAST('...' AS TIMESTAMP)` expression, and decimal string values may use an
+  explicit `CAST('...' AS DECIMAL(p, s))` expression for exact precision and
+  scale.
+
+With the pinned PySpark 4.0.5 client, `spark.sql("SELECT ...")` stays lazy and
+executes when an action such as `.collect()` is called. Supported DDL and INSERT
+commands take effect during `spark.sql(...)`; the returned DataFrame represents
+an empty command result, so calling `.collect()` on it is safe and does not
+repeat the write.
 
 The SQL subset rejects CTEs, `DISTINCT`, ordering, offsets, `FETCH`, `HAVING`,
 windows, wildcard modifiers, table functions, table sampling and hints, lateral

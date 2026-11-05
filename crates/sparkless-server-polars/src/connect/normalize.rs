@@ -17,22 +17,7 @@ pub(super) fn normalize_plan(plan: &proto::Plan) -> Result<ConnectExecutionPlan,
         Some(proto::plan::OpType::Command(command)) => {
             use proto::command::CommandType;
             match command.command_type.as_ref() {
-                Some(CommandType::SqlCommand(sql)) => ConnectExecutionPlan::Command(
-                    if sql.args.is_empty()
-                        && sql.pos_args.is_empty()
-                        && sql.named_arguments.is_empty()
-                        && sql.pos_arguments.is_empty()
-                        && sql.input.is_none()
-                    {
-                        ConnectCommand::Sql {
-                            sql: sql.sql.clone(),
-                        }
-                    } else {
-                        ConnectCommand::Unsupported(
-                            "parameterized or relation-backed SQL commands are not enabled".into(),
-                        )
-                    },
-                ),
+                Some(CommandType::SqlCommand(sql)) => normalize_sql_command(sql)?,
                 Some(other) => ConnectExecutionPlan::Command(ConnectCommand::Unsupported(format!(
                     "Connect command {other:?} is not enabled"
                 ))),
@@ -45,6 +30,75 @@ pub(super) fn normalize_plan(plan: &proto::Plan) -> Result<ConnectExecutionPlan,
     })
 }
 
+#[allow(deprecated)]
+fn normalize_sql_command(sql: &proto::SqlCommand) -> Result<ConnectExecutionPlan, Status> {
+    if !sql.args.is_empty()
+        || !sql.pos_args.is_empty()
+        || !sql.named_arguments.is_empty()
+        || !sql.pos_arguments.is_empty()
+    {
+        return Ok(ConnectExecutionPlan::Command(ConnectCommand::Unsupported(
+            "parameterized SQL commands are not enabled".into(),
+        )));
+    }
+
+    let query = match sql.input.as_ref() {
+        Some(input) if sql.sql.is_empty() => {
+            let Some(proto::relation::RelType::Sql(query)) = input.rel_type.as_ref() else {
+                return Ok(ConnectExecutionPlan::Command(ConnectCommand::Unsupported(
+                    "SQL commands require a direct SQL relation; relation-backed commands are not enabled".into(),
+                )));
+            };
+            if !query.args.is_empty()
+                || !query.pos_args.is_empty()
+                || !query.named_arguments.is_empty()
+                || !query.pos_arguments.is_empty()
+            {
+                return Ok(ConnectExecutionPlan::Command(ConnectCommand::Unsupported(
+                    "parameterized SQL relations are not enabled".into(),
+                )));
+            }
+            query.query.as_str()
+        }
+        Some(_) => {
+            return Ok(ConnectExecutionPlan::Command(ConnectCommand::Unsupported(
+                "SQL commands cannot combine the legacy SQL field with an input relation".into(),
+            )));
+        }
+        // The legacy scalar SQL field is still part of the wire contract for older clients.
+        None => sql.sql.as_str(),
+    };
+
+    if query.trim().is_empty() {
+        return Ok(ConnectExecutionPlan::Command(ConnectCommand::Unsupported(
+            "SQL command text is required".into(),
+        )));
+    }
+    let statement = robin_sparkless_sql::parse_statement(query).map_err(|error| {
+        Status::invalid_argument(format!("invalid Connect SQL command: {error}"))
+    })?;
+    match robin_sparkless_sql::lower_statement(&statement)
+        .map_err(|error| Status::invalid_argument(format!("unsupported Connect SQL: {error}")))?
+    {
+        // Spark Connect uses a SQL command as a preflight request for SELECT. Leave the actual
+        // query lazy so PySpark returns a DataFrame and executes the SQL relation on action.
+        robin_sparkless_sql::StatementPlan::Query(_) => {
+            Ok(ConnectExecutionPlan::Command(ConnectCommand::SqlQuery {
+                sql: query.to_string(),
+            }))
+        }
+        robin_sparkless_sql::StatementPlan::Command(_) => {
+            Ok(ConnectExecutionPlan::Command(ConnectCommand::Sql {
+                sql: query.to_string(),
+            }))
+        }
+        robin_sparkless_sql::StatementPlan::Metadata(_) => Ok(ConnectExecutionPlan::Command(
+            ConnectCommand::Unsupported("SQL metadata commands are not enabled".into()),
+        )),
+    }
+}
+
+#[allow(deprecated)]
 fn normalize_relation(relation: &proto::Relation, depth: usize) -> Result<ConnectRelation, Status> {
     if depth > MAX_PLAN_DEPTH {
         return Err(Status::resource_exhausted(format!(
@@ -234,6 +288,7 @@ fn normalize_group_type(value: i32) -> ConnectGroupType {
 
 /// Rebuilds the adapter's private Connect representation from the transport-neutral core plan.
 /// This keeps generated wire messages inside the Connect adapter implementation.
+#[allow(deprecated)]
 pub(super) fn materialize_plan(plan: &ConnectExecutionPlan) -> proto::Plan {
     match plan {
         ConnectExecutionPlan::Root(relation) => proto::Plan {
@@ -249,6 +304,20 @@ pub(super) fn materialize_plan(plan: &ConnectExecutionPlan) -> proto::Plan {
                         },
                     )),
                 },
+                ConnectCommand::SqlQuery { sql } => proto::Command {
+                    command_type: Some(proto::command::CommandType::SqlCommand(
+                        proto::SqlCommand {
+                            input: Some(proto::Relation {
+                                rel_type: Some(proto::relation::RelType::Sql(proto::Sql {
+                                    query: sql.clone(),
+                                    ..Default::default()
+                                })),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        },
+                    )),
+                },
                 ConnectCommand::Unsupported(_) => proto::Command::default(),
             })),
         },
@@ -256,7 +325,90 @@ pub(super) fn materialize_plan(plan: &ConnectExecutionPlan) -> proto::Plan {
     }
 }
 
-fn materialize_relation(relation: &ConnectRelation) -> proto::Relation {
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sql_command(query: &str) -> proto::Plan {
+        proto::Plan {
+            op_type: Some(proto::plan::OpType::Command(proto::Command {
+                command_type: Some(proto::command::CommandType::SqlCommand(proto::SqlCommand {
+                    input: Some(proto::Relation {
+                        rel_type: Some(proto::relation::RelType::Sql(proto::Sql {
+                            query: query.into(),
+                            ..Default::default()
+                        })),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                })),
+            })),
+        }
+    }
+
+    #[test]
+    fn current_client_sql_command_input_routes_reads_and_writes_by_effect() {
+        let read = normalize_plan(&sql_command("SELECT 7 AS value")).unwrap();
+        assert!(matches!(
+            read,
+            ConnectExecutionPlan::Command(ConnectCommand::SqlQuery { ref sql })
+                if sql == "SELECT 7 AS value"
+        ));
+
+        let write = normalize_plan(&sql_command("CREATE TABLE items (id BIGINT)")).unwrap();
+        assert!(matches!(
+            write,
+            ConnectExecutionPlan::Command(ConnectCommand::Sql { ref sql })
+                if sql == "CREATE TABLE items (id BIGINT)"
+        ));
+    }
+
+    #[test]
+    fn sql_command_rejects_parameterized_and_non_sql_inputs() {
+        let mut parameterized = sql_command("SELECT ?");
+        let Some(proto::plan::OpType::Command(command)) = parameterized.op_type.as_mut() else {
+            unreachable!()
+        };
+        let Some(proto::command::CommandType::SqlCommand(sql)) = command.command_type.as_mut()
+        else {
+            unreachable!()
+        };
+        let Some(input) = sql.input.as_mut() else {
+            unreachable!()
+        };
+        let Some(proto::relation::RelType::Sql(query)) = input.rel_type.as_mut() else {
+            unreachable!()
+        };
+        query.pos_arguments.push(proto::Expression::default());
+        assert!(matches!(
+            normalize_plan(&parameterized).unwrap(),
+            ConnectExecutionPlan::Command(ConnectCommand::Unsupported(_))
+        ));
+
+        let mut unrelated_input = sql_command("SELECT 7");
+        let Some(proto::plan::OpType::Command(command)) = unrelated_input.op_type.as_mut() else {
+            unreachable!()
+        };
+        let Some(proto::command::CommandType::SqlCommand(sql)) = command.command_type.as_mut()
+        else {
+            unreachable!()
+        };
+        sql.input = Some(proto::Relation {
+            rel_type: Some(proto::relation::RelType::Range(proto::Range {
+                end: 1,
+                step: 1,
+                ..Default::default()
+            })),
+            ..Default::default()
+        });
+        assert!(matches!(
+            normalize_plan(&unrelated_input).unwrap(),
+            ConnectExecutionPlan::Command(ConnectCommand::Unsupported(_))
+        ));
+    }
+}
+
+pub(super) fn materialize_relation(relation: &ConnectRelation) -> proto::Relation {
     use proto::relation::RelType;
 
     let rel_type = match &relation.kind {

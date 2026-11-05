@@ -31,8 +31,9 @@ This is a native single-node backend, not Apache Spark or general Spark compatib
 
 The candidate source now includes fixed-process backend selection, the DuckDB
 execution owner, Connect request translation and analysis, bounded Arrow
-streaming, typed `CREATE TABLE` and literal `INSERT ... VALUES`, transactional
-operation receipts, launcher identity negotiation, and capability reporting.
+streaming, typed `CREATE TABLE` and literal `INSERT ... VALUES` (including
+explicit timestamp and decimal casts), transactional operation receipts,
+launcher identity negotiation, and capability reporting.
 It also includes source changes for 420-07–420-11 and #1746. These are code
 implementation statements, not V37/V38 or performance results. No candidate
 release artifact or public capability claim has been approved.
@@ -49,13 +50,18 @@ source candidate:
 
 - DuckDB server and base Polars server compile with HTTP and Connect enabled.
 - `cargo test -p robin-sparkless-duckdb`: 8 passed.
-- `cargo test -p sparkless-server-polars --no-default-features --features connect,duckdb-source`: 62 passed, including local DuckDB command, SQL query, output schema, and Arrow stream coverage.
+- `cargo test -p sparkless-server-polars --no-default-features --features connect,duckdb-source --lib`: 67 passed, including local DuckDB command, SQL query, output schema, and Arrow stream coverage.
+- `PYTHONPATH=python/server-duckdb:python/connect /tmp/sparkless-phase420-client-py311/bin/python tests/connect/smoke_phase420_duckdb_execution.py --server-bin target/debug/sparkless-server-duckdb`: passed with the locked `pyspark-client==4.0.5`, `duckdb==1.5.1`, and PyArrow 26.0.0 environment. It covers public range/`selectExpr`, lazy SQL reads, `.collect()` on typed `CREATE TABLE`/`INSERT`, sequential visibility through the standalone DuckDB client, and read-after-restart.
+- The pinned differential runner passed 20 Spark 4.0.5 result/schema comparisons and rejected three documented unsupported forms. It recorded 26 DuckDB query witnesses and six committed-write witnesses using `pyspark-client==4.0.5`, `duckdb==1.5.1`, PyArrow 26.0.0, and Python 3.11.15 on macOS 26.5.2 arm64. The server binary SHA-256 is `d6613963776a8e19da068d3543fa3d7ed442171ecb9c71e44e64bdb47f9a3f0b`; the runner SHA-256 is `9bf68a2ce96ea9683e3d569070f3c87635eb666dee312afc6dfa51837db41d32`. The exact archive and outputs are retained in [the local report](evidence/phase-420-duckdb-connect-differential-local.json.gz), SHA-256 `307e20d21bdbae975746f7f0363892ffe4f43431a3760ab50dd0ef1f90499bad`.
 - `PYTHONPATH=python/testing .venv/bin/python -m pytest tests/unit/test_sparkless_testing.py::TestComparisonDataFrames -q`: 16 passed.
 - Ruff format and lint checks passed for the changed Python helper and tests.
 
-These are local source checks. They do not close V37 Spark result/schema
-comparison, V38 owner fault and interoperability coverage, performance
-reports, cross-platform packaging, or exact-artifact release gates.
+These are local source checks. The differential report covers a broad selected
+slice but does not close the full frozen V37 matrix, including overflow/ANSI
+boundaries, multipart identifiers, catalog changes between analysis and
+execution, and all supported type/configuration combinations. V38 owner fault
+and interoperability coverage, performance reports, cross-platform packaging,
+and exact-artifact release gates also remain open.
 
 ## D15 decision checklist
 

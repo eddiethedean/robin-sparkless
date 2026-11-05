@@ -5,7 +5,7 @@ use crate::connect::{
     MAX_CONNECT_LOCAL_DECODED_BYTES, MAX_CONNECT_LOCAL_IPC_BYTES, MAX_CONNECT_LOCAL_ROWS,
 };
 use robin_sparkless_core::engine::{ArrowIpcBatchStream, ArrowIpcStream, CancellationToken};
-use robin_sparkless_core::{DataType, EngineError, StructType};
+use robin_sparkless_core::{DataType, EngineError, LogicalField, StructType};
 use robin_sparkless_duckdb::{DUCKDB_EXECUTION_MAX_BATCH_BYTES, DUCKDB_EXECUTION_MAX_BATCH_ROWS};
 use robin_sparkless_sql::{
     ExpressionShape, FromPlan, GroupByPlan, JoinConstraintPlan, JoinKind, Projection, RelationPlan,
@@ -40,6 +40,15 @@ impl ConnectExecutionPort for DuckDbConnectExecution {
                 )
             })?;
         match &request.plan {
+            ConnectExecutionPlan::Command(ConnectCommand::SqlQuery { .. }) => {
+                // The Spark client sends SELECT through ExecuteCommand first to distinguish a
+                // command result from a lazy DataFrame. The SQL relation runs later on action.
+                Ok(ConnectExecutionResult {
+                    schema: None,
+                    batches: ArrowIpcBatchStream::new(std::iter::empty()),
+                    sql_command_result: None,
+                })
+            }
             ConnectExecutionPlan::Command(command) => {
                 execute_command(
                     session,
@@ -50,10 +59,13 @@ impl ConnectExecutionPort for DuckDbConnectExecution {
                 Ok(ConnectExecutionResult {
                     schema: None,
                     batches: ArrowIpcBatchStream::new(std::iter::empty()),
+                    sql_command_result: Some(empty_sql_command_result()),
                 })
             }
             ConnectExecutionPlan::Root(relation) => {
-                let mut renderer = PlanRenderer::new(session, relation)?;
+                let expected_schema =
+                    describe_connect_plan(session, &request.plan, &request.cancellation)?;
+                let mut renderer = PlanRenderer::new(session, relation, &request.cancellation)?;
                 let sql = format!("SELECT * FROM {}", renderer.relation(relation, 1)?);
                 stream_query(
                     session,
@@ -63,6 +75,7 @@ impl ConnectExecutionPort for DuckDbConnectExecution {
                     request.max_batch_rows,
                     request.max_response_bytes,
                     request.cancellation,
+                    expected_schema,
                 )
             }
             ConnectExecutionPlan::Missing => Err(failure(
@@ -84,7 +97,7 @@ pub(super) fn describe_connect_plan(
             "only relational plans can be analyzed by DuckDB",
         ));
     };
-    let mut renderer = PlanRenderer::new(session, relation)?;
+    let mut renderer = PlanRenderer::new(session, relation, cancellation)?;
     let sql = format!("SELECT * FROM {}", renderer.relation(relation, 1)?);
     if !renderer.local_inputs.is_empty() {
         // LocalRelation schema is encoded in its Arrow stream, so the same bounded owner path
@@ -93,16 +106,17 @@ pub(super) fn describe_connect_plan(
         let owner = session.owner.clone();
         let inputs = renderer.local_inputs;
         let expected_input_schemas = renderer.local_input_schemas;
-        let cancellation = cancellation.clone();
+        let worker_cancellation = cancellation.clone();
         thread::spawn(move || {
             if let Err(error) = owner.stream_query_with_arrow_ipc(
                 &sql,
                 &inputs,
                 &expected_input_schemas,
+                None,
                 MAX_CONNECT_LOCAL_IPC_BYTES,
                 MAX_CONNECT_LOCAL_ROWS,
                 MAX_CONNECT_LOCAL_DECODED_BYTES,
-                &cancellation,
+                &worker_cancellation,
                 DUCKDB_EXECUTION_MAX_BATCH_ROWS,
                 DUCKDB_EXECUTION_MAX_BATCH_BYTES,
                 |schema| send_event(&sender, DuckDbEvent::Schema(schema)),
@@ -115,19 +129,704 @@ pub(super) fn describe_connect_plan(
                 let _ = sender.send(DuckDbEvent::Error(error));
             }
         });
-        return match receiver.recv() {
+        let schema = match receiver.recv() {
             Ok(DuckDbEvent::Schema(schema)) => Ok(schema),
             Ok(DuckDbEvent::Error(error)) => Err(engine_failure(error)),
             _ => Err(failure(
                 "CONNECT_ANALYSIS_FAILED",
                 "DuckDB did not return an output schema",
             )),
-        };
+        }?;
+        return normalize_connect_schema(session, relation, schema, cancellation);
     }
-    session
+    let schema = session
         .owner
         .describe_query(&sql, cancellation)
-        .map_err(engine_failure)
+        .map_err(engine_failure)?;
+    normalize_connect_schema(session, relation, schema, cancellation)
+}
+
+fn normalize_connect_schema(
+    session: &DuckDbConnectSession,
+    relation: &ConnectRelation,
+    actual: StructType,
+    cancellation: &CancellationToken,
+) -> Result<StructType, ExecutionError> {
+    match &relation.kind {
+        ConnectRelationKind::Range { .. } => {
+            if actual.logical_fields().len() != 1 {
+                return Err(failure(
+                    "CONNECT_SCHEMA_MISMATCH",
+                    "DuckDB range output must have one field",
+                ));
+            }
+            let mut field = actual.logical_fields()[0].clone();
+            if !same_logical_type(&field.data_type, &DataType::Long)? {
+                return Err(failure(
+                    "CONNECT_SCHEMA_MISMATCH",
+                    "DuckDB range output must be a 64-bit integer",
+                ));
+            }
+            field.name = "id".into();
+            field.data_type = DataType::Long;
+            field.nullable = false;
+            Ok(StructType::from_logical_fields(vec![field]))
+        }
+        ConnectRelationKind::Alias { input, .. }
+        | ConnectRelationKind::Filter { input, .. }
+        | ConnectRelationKind::Limit { input, .. } => {
+            let input = input.as_deref().ok_or_else(|| {
+                failure(
+                    "CONNECT_RELATION_INPUT_REQUIRED",
+                    "Connect wrapper relation requires an input",
+                )
+            })?;
+            let expected = describe_connect_plan(
+                session,
+                &ConnectExecutionPlan::Root(input.clone()),
+                cancellation,
+            )?;
+            validate_logical_types(&actual, &expected)?;
+            Ok(expected)
+        }
+        ConnectRelationKind::Join { .. } => {
+            let expected = join_output_schema(session, relation, cancellation)?;
+            validate_logical_types(&actual, &expected)?;
+            Ok(expected)
+        }
+        ConnectRelationKind::Project {
+            input: Some(input),
+            expressions,
+        } => project_output_schema(session, input, expressions, actual, cancellation),
+        ConnectRelationKind::Aggregate {
+            input: Some(input),
+            grouping_expressions,
+            aggregate_expressions,
+            ..
+        } => aggregate_output_schema(
+            session,
+            input,
+            grouping_expressions,
+            aggregate_expressions,
+            actual,
+            cancellation,
+        ),
+        ConnectRelationKind::Project { input: None, .. }
+        | ConnectRelationKind::Aggregate { input: None, .. } => Err(failure(
+            "CONNECT_RELATION_INPUT_REQUIRED",
+            "Connect projection or aggregate requires an input",
+        )),
+        _ => Ok(actual),
+    }
+}
+
+fn project_output_schema(
+    session: &DuckDbConnectSession,
+    input: &ConnectRelation,
+    expressions: &[ConnectExpression],
+    actual: StructType,
+    cancellation: &CancellationToken,
+) -> Result<StructType, ExecutionError> {
+    if actual.logical_fields().len() != expressions.len() {
+        return Err(failure(
+            "CONNECT_SCHEMA_MISMATCH",
+            "DuckDB projection width does not match Spark Connect expressions",
+        ));
+    }
+    let source_schema = describe_connect_plan(
+        session,
+        &ConnectExecutionPlan::Root(input.clone()),
+        cancellation,
+    )?;
+    let source_fields = if let Some(join) = transparent_join(input) {
+        Some(join_source_field_map(
+            session,
+            join,
+            cancellation,
+            &source_schema,
+        )?)
+    } else {
+        None
+    };
+    let mut fields = actual.logical_fields().to_vec();
+    for (field, expression) in fields.iter_mut().zip(expressions) {
+        if let Some(name) = projection_output_name(expression, &field.name) {
+            field.name = name;
+        }
+        if let Some(source) =
+            source_field_for_expression(expression, &source_schema, source_fields.as_ref())
+        {
+            if !same_logical_type(&field.data_type, &source.data_type)? {
+                return Err(failure(
+                    "CONNECT_SCHEMA_MISMATCH",
+                    "DuckDB projected attribute type does not match its Spark Connect input",
+                ));
+            }
+            field.data_type = source.data_type.clone();
+            field.nullable = source.nullable;
+            field.metadata = source.metadata.clone();
+        } else if let Some(nullable) =
+            expression_nullability(expression, &source_schema, source_fields.as_ref())
+        {
+            field.nullable = nullable;
+        }
+        if let Some(metadata) = expression_alias_metadata(expression)? {
+            field.metadata = metadata;
+        }
+    }
+    Ok(StructType::from_logical_fields(fields))
+}
+
+fn aggregate_output_schema(
+    session: &DuckDbConnectSession,
+    input: &ConnectRelation,
+    grouping_expressions: &[ConnectExpression],
+    aggregate_expressions: &[ConnectExpression],
+    actual: StructType,
+    cancellation: &CancellationToken,
+) -> Result<StructType, ExecutionError> {
+    if actual.logical_fields().len() != grouping_expressions.len() + aggregate_expressions.len() {
+        return Err(failure(
+            "CONNECT_SCHEMA_MISMATCH",
+            "DuckDB aggregate output width does not match Spark Connect expressions",
+        ));
+    }
+    let source_schema = describe_connect_plan(
+        session,
+        &ConnectExecutionPlan::Root(input.clone()),
+        cancellation,
+    )?;
+    let source_fields = if let Some(join) = transparent_join(input) {
+        Some(join_source_field_map(
+            session,
+            join,
+            cancellation,
+            &source_schema,
+        )?)
+    } else {
+        None
+    };
+    let mut fields = actual.logical_fields().to_vec();
+    for (index, expression) in grouping_expressions.iter().enumerate() {
+        let field = &mut fields[index];
+        if let Some(name) = projection_output_name(expression, &field.name) {
+            field.name = name;
+        }
+        if let Some(source) =
+            source_field_for_expression(expression, &source_schema, source_fields.as_ref())
+        {
+            field.data_type = source.data_type.clone();
+            field.nullable = source.nullable;
+            field.metadata = source.metadata.clone();
+        }
+        if let Some(metadata) = expression_alias_metadata(expression)? {
+            field.metadata = metadata;
+        }
+    }
+    for (offset, expression) in aggregate_expressions.iter().enumerate() {
+        let index = grouping_expressions.len() + offset;
+        let field = &mut fields[index];
+        let (aggregate, explicit_alias) = aggregate_function(expression)?;
+        match aggregate {
+            "count" => {
+                field.data_type = DataType::Long;
+                field.nullable = false;
+            }
+            "sum" => {
+                let (_, argument) = aggregate_expression(expression).ok_or_else(|| {
+                    failure("CONNECT_AGGREGATE_UNSUPPORTED", "sum requires one argument")
+                })?;
+                let source =
+                    source_field_for_expression(argument, &source_schema, source_fields.as_ref())
+                        .ok_or_else(|| {
+                        failure(
+                            "CONNECT_AGGREGATE_UNSUPPORTED",
+                            "sum requires a resolvable input column",
+                        )
+                    })?;
+                field.data_type = spark_sum_type(&source.data_type)?.0;
+                field.nullable = true;
+            }
+            _ => {
+                return Err(failure(
+                    "CONNECT_AGGREGATE_UNSUPPORTED",
+                    "DuckDB execution enables count and sum aggregates only",
+                ));
+            }
+        }
+        field.name = aggregate_output_name(expression, &field.name);
+        if let Some(metadata) = expression_alias_metadata(expression)? {
+            field.metadata = metadata;
+        } else if aggregate == "sum" && !explicit_alias {
+            field.metadata.insert(
+                "__autoGeneratedAlias".into(),
+                serde_json::Value::String("true".into()),
+            );
+        }
+    }
+    Ok(StructType::from_logical_fields(fields))
+}
+
+fn aggregate_expression(expression: &ConnectExpression) -> Option<(&str, &ConnectExpression)> {
+    let expression = match expression {
+        ConnectExpression::Alias {
+            expression: Some(expression),
+            ..
+        } => expression.as_ref(),
+        expression => expression,
+    };
+    let ConnectExpression::Function {
+        name, arguments, ..
+    } = expression
+    else {
+        return None;
+    };
+    let argument = arguments.first()?;
+    Some((name.as_str(), argument))
+}
+
+fn aggregate_function(expression: &ConnectExpression) -> Result<(&str, bool), ExecutionError> {
+    let explicit_alias = matches!(expression, ConnectExpression::Alias { .. });
+    let _ = expression_alias_metadata(expression)?;
+    let expression = match expression {
+        ConnectExpression::Alias {
+            expression: Some(expression),
+            names,
+            ..
+        } if names.len() == 1 => expression.as_ref(),
+        ConnectExpression::Alias { .. } => {
+            return Err(failure(
+                "CONNECT_ALIAS_UNSUPPORTED",
+                "aggregate aliases require one name",
+            ));
+        }
+        expression => expression,
+    };
+    let ConnectExpression::Function { name, .. } = expression else {
+        return Err(failure(
+            "CONNECT_AGGREGATE_UNSUPPORTED",
+            "aggregate output must be count or sum",
+        ));
+    };
+    let name = name.to_ascii_lowercase();
+    if !matches!(name.as_str(), "count" | "sum") {
+        return Err(failure(
+            "CONNECT_AGGREGATE_UNSUPPORTED",
+            "aggregate output must be count or sum",
+        ));
+    }
+    Ok((if name == "sum" { "sum" } else { "count" }, explicit_alias))
+}
+
+fn aggregate_alias_name(expression: &ConnectExpression) -> Option<&str> {
+    match expression {
+        ConnectExpression::Alias { names, .. } if names.len() == 1 => {
+            names.first().map(String::as_str)
+        }
+        _ => None,
+    }
+}
+
+fn aggregate_output_name(expression: &ConnectExpression, fallback: &str) -> String {
+    if let Some(name) = aggregate_alias_name(expression) {
+        return name.to_string();
+    }
+    let Some((function, argument)) = aggregate_expression(expression) else {
+        return fallback.to_string();
+    };
+    let argument_name = projection_attribute(argument)
+        .map(|(_, name)| name)
+        .or_else(|| match argument {
+            ConnectExpression::Literal(ConnectLiteral::Integer(value)) => Some(value.to_string()),
+            ConnectExpression::Literal(ConnectLiteral::Long(value)) => Some(value.to_string()),
+            _ => None,
+        });
+    let argument_name = argument_name.or_else(|| {
+        if function.eq_ignore_ascii_case("count") {
+            Some("1".into())
+        } else {
+            None
+        }
+    });
+    argument_name.map_or_else(
+        || fallback.to_string(),
+        |argument| format!("{}({argument})", function.to_ascii_lowercase()),
+    )
+}
+
+fn spark_sum_type(data_type: &DataType) -> Result<(DataType, String), ExecutionError> {
+    match data_type {
+        DataType::Byte | DataType::Short | DataType::Integer | DataType::Long => {
+            Ok((DataType::Long, "BIGINT".into()))
+        }
+        DataType::Float | DataType::Double => Ok((DataType::Double, "DOUBLE".into())),
+        DataType::Decimal(precision, scale) => {
+            let precision = precision.saturating_add(10).min(38);
+            Ok((
+                DataType::Decimal(precision, *scale),
+                format!("DECIMAL({precision},{scale})"),
+            ))
+        }
+        _ => Err(failure(
+            "CONNECT_AGGREGATE_TYPE_UNSUPPORTED",
+            "sum supports signed numeric columns only",
+        )),
+    }
+}
+
+fn projection_output_name(expression: &ConnectExpression, fallback: &str) -> Option<String> {
+    match expression {
+        ConnectExpression::Alias { names, .. } if names.len() == 1 => names.first().cloned(),
+        ConnectExpression::Attribute { identifier, .. } => Some(
+            identifier
+                .rsplit('.')
+                .next()
+                .unwrap_or(identifier)
+                .trim_matches('`')
+                .trim_matches('"')
+                .to_string(),
+        ),
+        ConnectExpression::ExpressionString(expression) => expression_string_plan(expression)
+            .and_then(|(_, alias)| alias)
+            .or_else(|| Some(fallback.into())),
+        _ => Some(fallback.into()),
+    }
+}
+
+fn source_field_for_expression<'a>(
+    expression: &ConnectExpression,
+    source_schema: &StructType,
+    plan_fields: Option<&HashMap<i64, Vec<LogicalField>>>,
+) -> Option<LogicalField> {
+    if let Some((Some(plan_id), identifier)) = projection_attribute(expression)
+        && let Some(fields) = plan_fields.and_then(|fields| fields.get(&plan_id))
+    {
+        let mut matches = fields
+            .iter()
+            .filter(|field| field.name.eq_ignore_ascii_case(&identifier));
+        let field = matches.next()?;
+        return matches.next().is_none().then(|| field.clone());
+    }
+    let Some((_, identifier)) = projection_attribute(expression) else {
+        return None;
+    };
+    let mut matches = source_schema
+        .logical_fields()
+        .iter()
+        .filter(|field| field.name.eq_ignore_ascii_case(&identifier));
+    let field = matches.next()?;
+    matches.next().is_none().then(|| field.clone())
+}
+
+fn expression_nullability(
+    expression: &ConnectExpression,
+    source_schema: &StructType,
+    plan_fields: Option<&HashMap<i64, Vec<LogicalField>>>,
+) -> Option<bool> {
+    match expression {
+        ConnectExpression::Alias {
+            expression: Some(expression),
+            ..
+        } => expression_nullability(expression, source_schema, plan_fields),
+        ConnectExpression::Attribute { .. } => {
+            source_field_for_expression(expression, source_schema, plan_fields)
+                .map(|field| field.nullable)
+        }
+        ConnectExpression::Literal(ConnectLiteral::Null) => Some(true),
+        ConnectExpression::Literal(_) => Some(false),
+        ConnectExpression::Function {
+            name, arguments, ..
+        } => {
+            if matches!(
+                name.to_ascii_lowercase().as_str(),
+                "isnull" | "isnotnull" | "count"
+            ) {
+                return Some(false);
+            }
+            let nullabilities = arguments
+                .iter()
+                .map(|argument| expression_nullability(argument, source_schema, plan_fields))
+                .collect::<Option<Vec<_>>>()?;
+            Some(nullabilities.into_iter().any(|nullable| nullable))
+        }
+        ConnectExpression::ExpressionString(expression) => {
+            let (expression, _) = expression_string_plan(expression)?;
+            sql_expression_nullability(&expression, source_schema)
+        }
+        _ => None,
+    }
+}
+
+fn sql_expression_nullability(
+    expression: &SqlExpression,
+    source_schema: &StructType,
+) -> Option<bool> {
+    match &expression.shape {
+        ExpressionShape::Identifier(parts) => {
+            let name = parts.last()?;
+            let mut matches = source_schema
+                .logical_fields()
+                .iter()
+                .filter(|field| field.name.eq_ignore_ascii_case(name));
+            let field = matches.next()?;
+            matches.next().is_none().then_some(field.nullable)
+        }
+        ExpressionShape::Literal => Some(expression.sql.eq_ignore_ascii_case("NULL")),
+        ExpressionShape::IsNull { .. } => Some(false),
+        ExpressionShape::Unary { expression, .. } => {
+            sql_expression_nullability(expression, source_schema)
+        }
+        ExpressionShape::Binary { left, right, .. } => Some(
+            sql_expression_nullability(left, source_schema)?
+                || sql_expression_nullability(right, source_schema)?,
+        ),
+        ExpressionShape::Function { name, .. } if name.eq_ignore_ascii_case("count") => Some(false),
+        ExpressionShape::Function { arguments, .. } => Some(
+            arguments
+                .iter()
+                .map(|argument| sql_expression_nullability(argument, source_schema))
+                .collect::<Option<Vec<_>>>()?
+                .into_iter()
+                .any(|nullable| nullable),
+        ),
+        ExpressionShape::Composite => None,
+    }
+}
+
+fn expression_string_plan(expression: &str) -> Option<(SqlExpression, Option<String>)> {
+    let statement = robin_sparkless_sql::parse_statement(&format!("SELECT {expression}")).ok()?;
+    let StatementPlan::Query(query) = robin_sparkless_sql::lower_statement(&statement).ok()? else {
+        return None;
+    };
+    let RelationalNode::Select(select) = query.body else {
+        return None;
+    };
+    if select.projection.len() != 1 {
+        return None;
+    }
+    match select.projection.into_iter().next()? {
+        Projection::Expression { expression, alias } => Some((expression, alias)),
+        Projection::Wildcard | Projection::QualifiedWildcard(_) => None,
+    }
+}
+
+fn expression_alias_metadata(
+    expression: &ConnectExpression,
+) -> Result<Option<std::collections::BTreeMap<String, serde_json::Value>>, ExecutionError> {
+    let ConnectExpression::Alias { metadata, .. } = expression else {
+        return Ok(None);
+    };
+    let Some(metadata) = metadata else {
+        return Ok(None);
+    };
+    let value = serde_json::from_str::<serde_json::Value>(metadata)
+        .map_err(|error| failure("CONNECT_ALIAS_METADATA_INVALID", &error.to_string()))?;
+    let Some(object) = value.as_object() else {
+        return Err(failure(
+            "CONNECT_ALIAS_METADATA_INVALID",
+            "Connect alias metadata must be a JSON object",
+        ));
+    };
+    Ok(Some(
+        object
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect(),
+    ))
+}
+
+fn join_output_schema(
+    session: &DuckDbConnectSession,
+    relation: &ConnectRelation,
+    cancellation: &CancellationToken,
+) -> Result<StructType, ExecutionError> {
+    let ConnectRelationKind::Join {
+        left,
+        right,
+        using_columns,
+        ..
+    } = &relation.kind
+    else {
+        return Err(failure(
+            "CONNECT_JOIN_UNSUPPORTED",
+            "expected a Join relation",
+        ));
+    };
+    let left = left
+        .as_deref()
+        .ok_or_else(|| failure("CONNECT_JOIN_LEFT_REQUIRED", "Join left input is required"))?;
+    let right = right.as_deref().ok_or_else(|| {
+        failure(
+            "CONNECT_JOIN_RIGHT_REQUIRED",
+            "Join right input is required",
+        )
+    })?;
+    let left_schema = describe_connect_plan(
+        session,
+        &ConnectExecutionPlan::Root(left.clone()),
+        cancellation,
+    )?;
+    let right_schema = describe_connect_plan(
+        session,
+        &ConnectExecutionPlan::Root(right.clone()),
+        cancellation,
+    )?;
+    let using = using_columns
+        .iter()
+        .map(|column| column.to_ascii_lowercase())
+        .collect::<HashSet<_>>();
+    let mut fields = left_schema.logical_fields().to_vec();
+    if !using.is_empty() {
+        for column in &using {
+            let left_matches = left_schema
+                .logical_fields()
+                .iter()
+                .filter(|field| field.name.eq_ignore_ascii_case(column))
+                .collect::<Vec<_>>();
+            let right_matches = right_schema
+                .logical_fields()
+                .iter()
+                .filter(|field| field.name.eq_ignore_ascii_case(column))
+                .collect::<Vec<_>>();
+            if left_matches.len() != 1 || right_matches.len() != 1 {
+                return Err(failure(
+                    "CONNECT_JOIN_KEY_AMBIGUOUS",
+                    "USING join keys must resolve to one field on each input",
+                ));
+            }
+            if !same_logical_type(&left_matches[0].data_type, &right_matches[0].data_type)? {
+                return Err(failure(
+                    "CONNECT_JOIN_TYPE_UNSUPPORTED",
+                    "USING join keys must have matching logical types",
+                ));
+            }
+            if let Some(field) = fields
+                .iter_mut()
+                .find(|field| field.name.eq_ignore_ascii_case(column))
+            {
+                field.nullable = left_matches[0].nullable || right_matches[0].nullable;
+            }
+        }
+    }
+    fields.extend(
+        right_schema
+            .logical_fields()
+            .iter()
+            .filter(|field| !using.contains(&field.name.to_ascii_lowercase()))
+            .cloned(),
+    );
+    Ok(StructType::from_logical_fields(fields))
+}
+
+fn join_source_field_map(
+    session: &DuckDbConnectSession,
+    relation: &ConnectRelation,
+    cancellation: &CancellationToken,
+    join_schema: &StructType,
+) -> Result<HashMap<i64, Vec<robin_sparkless_core::LogicalField>>, ExecutionError> {
+    let ConnectRelationKind::Join { left, right, .. } = &relation.kind else {
+        return Err(failure(
+            "CONNECT_JOIN_UNSUPPORTED",
+            "expected a Join relation",
+        ));
+    };
+    let mut schemas = HashMap::new();
+    for input in [left.as_deref(), right.as_deref()] {
+        let input = input
+            .ok_or_else(|| failure("CONNECT_JOIN_INPUT_REQUIRED", "Join input is required"))?;
+        let schema = describe_connect_plan(
+            session,
+            &ConnectExecutionPlan::Root(input.clone()),
+            cancellation,
+        )?;
+        let mut ids = HashSet::new();
+        collect_plan_ids(input, &mut ids, 1)?;
+        for id in ids {
+            schemas.insert(id, schema.logical_fields().to_vec());
+        }
+    }
+    if let Some(plan_id) = relation.plan_id {
+        schemas.insert(plan_id, join_schema.logical_fields().to_vec());
+    }
+    Ok(schemas)
+}
+
+fn transparent_join(relation: &ConnectRelation) -> Option<&ConnectRelation> {
+    match &relation.kind {
+        ConnectRelationKind::Join { .. } => Some(relation),
+        ConnectRelationKind::Alias { input, .. }
+        | ConnectRelationKind::Filter { input, .. }
+        | ConnectRelationKind::Limit { input, .. } => input.as_deref().and_then(transparent_join),
+        _ => None,
+    }
+}
+
+fn projection_attribute(expression: &ConnectExpression) -> Option<(Option<i64>, String)> {
+    match expression {
+        ConnectExpression::Alias {
+            expression: Some(expression),
+            names,
+            ..
+        } if names.len() == 1 => projection_attribute(expression),
+        ConnectExpression::Attribute {
+            identifier,
+            plan_id,
+            is_metadata_column: false,
+        } => Some((
+            *plan_id,
+            identifier
+                .rsplit('.')
+                .next()
+                .unwrap_or(identifier)
+                .trim_matches('`')
+                .trim_matches('"')
+                .to_string(),
+        )),
+        ConnectExpression::ExpressionString(expression) => {
+            let (expression, _) = expression_string_plan(expression)?;
+            let ExpressionShape::Identifier(parts) = expression.shape else {
+                return None;
+            };
+            Some((None, parts.last()?.clone()))
+        }
+        _ => None,
+    }
+}
+
+fn validate_logical_types(
+    actual: &StructType,
+    expected: &StructType,
+) -> Result<(), ExecutionError> {
+    if actual.logical_fields().len() != expected.logical_fields().len() {
+        return Err(failure(
+            "CONNECT_SCHEMA_MISMATCH",
+            "DuckDB join output width does not match Spark Connect inputs",
+        ));
+    }
+    for (actual, expected) in actual
+        .logical_fields()
+        .iter()
+        .zip(expected.logical_fields())
+    {
+        if !same_logical_type(&actual.data_type, &expected.data_type)? {
+            return Err(failure(
+                "CONNECT_SCHEMA_MISMATCH",
+                "DuckDB join output types do not match Spark Connect inputs",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn same_logical_type(
+    left: &robin_sparkless_core::DataType,
+    right: &robin_sparkless_core::DataType,
+) -> Result<bool, ExecutionError> {
+    let left = serde_json::to_value(left)
+        .map_err(|error| failure("CONNECT_SCHEMA_INVALID", &error.to_string()))?;
+    let right = serde_json::to_value(right)
+        .map_err(|error| failure("CONNECT_SCHEMA_INVALID", &error.to_string()))?;
+    Ok(left == right)
 }
 
 pub(super) fn analysis_response(
@@ -225,6 +924,7 @@ fn stream_query(
     max_batch_rows: usize,
     max_response_bytes: usize,
     cancellation: CancellationToken,
+    expected_schema: StructType,
 ) -> Result<ConnectExecutionResult, ExecutionError> {
     let max_rows = max_batch_rows.min(DUCKDB_EXECUTION_MAX_BATCH_ROWS);
     let max_bytes = max_response_bytes
@@ -240,11 +940,13 @@ fn stream_query(
     let owner = session.owner.clone();
     let worker_sql = sql;
     let worker_token = cancellation.clone();
+    let worker_output_schema = expected_schema.clone();
     thread::spawn(move || {
         let result = owner.stream_query_with_arrow_ipc(
             &worker_sql,
             &local_inputs,
             &expected_input_schemas,
+            Some(&worker_output_schema),
             MAX_CONNECT_LOCAL_IPC_BYTES,
             MAX_CONNECT_LOCAL_ROWS,
             MAX_CONNECT_LOCAL_DECODED_BYTES,
@@ -261,7 +963,7 @@ fn stream_query(
         }
     });
     let schema = match receiver.recv() {
-        Ok(DuckDbEvent::Schema(schema)) => schema,
+        Ok(DuckDbEvent::Schema(_)) => expected_schema,
         Ok(DuckDbEvent::Error(error)) => return Err(engine_failure(error)),
         _ => {
             return Err(failure(
@@ -293,6 +995,7 @@ fn stream_query(
     Ok(ConnectExecutionResult {
         schema: Some(schema),
         batches,
+        sql_command_result: None,
     })
 }
 
@@ -311,6 +1014,7 @@ fn send_event(sender: &SyncSender<DuckDbEvent>, event: DuckDbEvent) -> Result<()
 
 struct PlanRenderer<'a> {
     session: &'a DuckDbConnectSession,
+    cancellation: CancellationToken,
     local_inputs: Vec<Vec<u8>>,
     local_input_schemas: Vec<Option<StructType>>,
 }
@@ -319,11 +1023,13 @@ impl<'a> PlanRenderer<'a> {
     fn new(
         session: &'a DuckDbConnectSession,
         root: &ConnectRelation,
+        cancellation: &CancellationToken,
     ) -> Result<Self, ExecutionError> {
         let mut plan_ids = HashSet::new();
         collect_plan_ids(root, &mut plan_ids, 1)?;
         Ok(Self {
             session,
+            cancellation: cancellation.clone(),
             local_inputs: Vec::new(),
             local_input_schemas: Vec::new(),
         })
@@ -451,8 +1157,15 @@ impl<'a> PlanRenderer<'a> {
                 let input_relation = input.as_deref().ok_or_else(|| {
                     failure("CONNECT_FILTER_INPUT_REQUIRED", "Filter input is required")
                 })?;
-                let expression_aliases = expression_aliases_for_relation(input_relation)?;
-                let input = self.relation(input_relation, depth + 1)?;
+                let (input, expression_aliases) =
+                    if matches!(&input_relation.kind, ConnectRelationKind::Join { .. }) {
+                        self.join_from(input_relation, depth + 1)?
+                    } else {
+                        (
+                            self.relation(input_relation, depth + 1)?,
+                            expression_aliases_for_relation(input_relation)?,
+                        )
+                    };
                 let condition = render_connect_expression(
                     condition.as_ref().ok_or_else(|| {
                         failure(
@@ -477,14 +1190,36 @@ impl<'a> PlanRenderer<'a> {
                         "Project input is required",
                     )
                 })?;
-                let expression_aliases = expression_aliases_for_relation(input_relation)?;
-                let input = self.relation(input_relation, depth + 1)?;
+                let (input, expression_aliases, filter) = match &input_relation.kind {
+                    ConnectRelationKind::Join { .. } => {
+                        let (input, aliases) = self.join_from(input_relation, depth + 1)?;
+                        (input, aliases, None)
+                    }
+                    ConnectRelationKind::Filter {
+                        input: Some(join),
+                        condition: Some(condition),
+                    } if matches!(&join.kind, ConnectRelationKind::Join { .. }) => {
+                        let (input, aliases) = self.join_from(join, depth + 2)?;
+                        let condition = render_connect_expression(condition, &aliases)?;
+                        (input, aliases, Some(condition))
+                    }
+                    _ => (
+                        self.relation(input_relation, depth + 1)?,
+                        expression_aliases_for_relation(input_relation)?,
+                        None,
+                    ),
+                };
                 let projection = expressions
                     .iter()
                     .map(|expression| render_connect_projection(expression, &expression_aliases))
                     .collect::<Result<Vec<_>, _>>()?
                     .join(", ");
-                Ok(format!("(SELECT {projection} FROM {input})"))
+                Ok(match filter {
+                    Some(filter) => {
+                        format!("(SELECT {projection} FROM {input} WHERE {filter})")
+                    }
+                    None => format!("(SELECT {projection} FROM {input})"),
+                })
             }
             ConnectRelationKind::Limit { input, limit } => {
                 if *limit < 0 || *limit as u128 > MAX_RANGE_ROWS {
@@ -501,66 +1236,9 @@ impl<'a> PlanRenderer<'a> {
                 )?;
                 Ok(format!("(SELECT * FROM {input} LIMIT {limit})"))
             }
-            ConnectRelationKind::Join {
-                left,
-                right,
-                condition,
-                join_type,
-                using_columns,
-                has_join_data_type: _,
-            } => {
-                if !matches!(
-                    join_type,
-                    ConnectJoinType::Inner | ConnectJoinType::Unspecified
-                ) || (condition.is_some() && !using_columns.is_empty())
-                    || (condition.is_none() && using_columns.is_empty())
-                {
-                    return Err(failure(
-                        "CONNECT_JOIN_UNSUPPORTED",
-                        "DuckDB execution enables inner equijoins and USING joins only",
-                    ));
-                }
-                let left_relation = left.as_deref().ok_or_else(|| {
-                    failure("CONNECT_JOIN_LEFT_REQUIRED", "Join left input is required")
-                })?;
-                let right_relation = right.as_deref().ok_or_else(|| {
-                    failure(
-                        "CONNECT_JOIN_RIGHT_REQUIRED",
-                        "Join right input is required",
-                    )
-                })?;
-                let expression_aliases =
-                    expression_aliases_for_join(left_relation, right_relation)?;
-                let left = self.relation(left_relation, depth + 1)?;
-                let right = self.relation(right_relation, depth + 1)?;
-                if !using_columns.is_empty() {
-                    let columns = using_columns
-                        .iter()
-                        .map(|column| validate_identifier(column).map(quote_identifier))
-                        .collect::<Result<Vec<_>, _>>()?;
-                    Ok(format!(
-                        "(SELECT * FROM {left} INNER JOIN {right} USING ({}))",
-                        columns.join(", ")
-                    ))
-                } else {
-                    let condition = condition.as_ref().ok_or_else(|| {
-                        failure(
-                            "CONNECT_JOIN_CONDITION_REQUIRED",
-                            "Join condition is required",
-                        )
-                    })?;
-                    if !is_connect_equality(condition) {
-                        return Err(failure(
-                            "CONNECT_JOIN_UNSUPPORTED",
-                            "DuckDB execution enables equijoin predicates only",
-                        ));
-                    }
-                    Ok(format!(
-                        "(SELECT * FROM {left} INNER JOIN {right} ON {})",
-                        render_connect_expression(condition, &expression_aliases)?
-                    ))
-                }
-            }
+            ConnectRelationKind::Join { .. } => self
+                .join_from(relation, depth)
+                .map(|(from, _)| format!("(SELECT * FROM {from})")),
             ConnectRelationKind::Aggregate {
                 input,
                 group_type,
@@ -595,21 +1273,40 @@ impl<'a> PlanRenderer<'a> {
                     )
                 })?;
                 let expression_aliases = expression_aliases_for_relation(input_relation)?;
+                let input_schema = describe_connect_plan(
+                    self.session,
+                    &ConnectExecutionPlan::Root(input_relation.clone()),
+                    &self.cancellation,
+                )?;
                 let input = self.relation(input_relation, depth + 1)?;
-                let aggregates = aggregate_expressions
+                let aggregate_sql = aggregate_expressions
                     .iter()
-                    .map(|expression| render_connect_projection(expression, &expression_aliases))
-                    .collect::<Result<Vec<_>, _>>()?
-                    .join(", ");
+                    .map(|expression| {
+                        render_connect_aggregate_projection(
+                            expression,
+                            &expression_aliases,
+                            &input_schema,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
                 let groups = grouping_expressions
                     .iter()
                     .map(|expression| render_connect_expression(expression, &expression_aliases))
                     .collect::<Result<Vec<_>, _>>()?;
+                let grouping_projection = grouping_expressions
+                    .iter()
+                    .map(|expression| render_connect_projection(expression, &expression_aliases))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let projection = grouping_projection
+                    .into_iter()
+                    .chain(aggregate_sql)
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 if groups.is_empty() {
-                    Ok(format!("(SELECT {aggregates} FROM {input})"))
+                    Ok(format!("(SELECT {projection} FROM {input})"))
                 } else {
                     Ok(format!(
-                        "(SELECT {aggregates} FROM {input} GROUP BY {})",
+                        "(SELECT {projection} FROM {input} GROUP BY {})",
                         groups.join(", ")
                     ))
                 }
@@ -654,6 +1351,75 @@ impl<'a> PlanRenderer<'a> {
         } else {
             Ok(rendered)
         }
+    }
+
+    fn join_from(
+        &mut self,
+        relation: &ConnectRelation,
+        depth: usize,
+    ) -> Result<(String, HashMap<i64, i64>), ExecutionError> {
+        let ConnectRelationKind::Join {
+            left,
+            right,
+            condition,
+            join_type,
+            using_columns,
+            ..
+        } = &relation.kind
+        else {
+            return Err(failure(
+                "CONNECT_JOIN_UNSUPPORTED",
+                "expected a Join relation",
+            ));
+        };
+        if !matches!(
+            join_type,
+            ConnectJoinType::Inner | ConnectJoinType::Unspecified
+        ) || (condition.is_some() && !using_columns.is_empty())
+            || (condition.is_none() && using_columns.is_empty())
+        {
+            return Err(failure(
+                "CONNECT_JOIN_UNSUPPORTED",
+                "DuckDB execution enables inner equijoins and USING joins only",
+            ));
+        }
+        let left_relation = left
+            .as_deref()
+            .ok_or_else(|| failure("CONNECT_JOIN_LEFT_REQUIRED", "Join left input is required"))?;
+        let right_relation = right.as_deref().ok_or_else(|| {
+            failure(
+                "CONNECT_JOIN_RIGHT_REQUIRED",
+                "Join right input is required",
+            )
+        })?;
+        let expression_aliases = expression_aliases_for_join(left_relation, right_relation)?;
+        let left = self.relation(left_relation, depth + 1)?;
+        let right = self.relation(right_relation, depth + 1)?;
+        let sql = if !using_columns.is_empty() {
+            let columns = using_columns
+                .iter()
+                .map(|column| validate_identifier(column).map(quote_identifier))
+                .collect::<Result<Vec<_>, _>>()?;
+            format!("{left} INNER JOIN {right} USING ({})", columns.join(", "))
+        } else {
+            let condition = condition.as_ref().ok_or_else(|| {
+                failure(
+                    "CONNECT_JOIN_CONDITION_REQUIRED",
+                    "Join condition is required",
+                )
+            })?;
+            if !is_connect_equality(condition) {
+                return Err(failure(
+                    "CONNECT_JOIN_UNSUPPORTED",
+                    "DuckDB execution enables equijoin predicates only",
+                ));
+            }
+            format!(
+                "{left} INNER JOIN {right} ON {}",
+                render_connect_expression(condition, &expression_aliases)?
+            )
+        };
+        Ok((sql, expression_aliases))
     }
 
     fn sql_query(&mut self, query: &SqlQueryPlan) -> Result<String, ExecutionError> {
@@ -1104,6 +1870,18 @@ fn execute_command(
         .map_err(engine_failure)
 }
 
+fn empty_sql_command_result() -> ConnectRelation {
+    ConnectRelation {
+        plan_id: None,
+        kind: ConnectRelationKind::Range {
+            start: None,
+            end: 0,
+            step: 1,
+            partitions: None,
+        },
+    }
+}
+
 fn simple_create_table(create: &robin_sparkless_sql::ast::CreateTable) -> bool {
     !create.or_replace
         && !create.temporary
@@ -1313,12 +2091,48 @@ fn simple_insert(insert: &robin_sparkless_sql::ast::Insert) -> bool {
 }
 
 fn simple_insert_value(expression: &robin_sparkless_sql::ast::Expr) -> bool {
-    use robin_sparkless_sql::ast::{Expr, UnaryOperator, Value};
+    use robin_sparkless_sql::ast::{CastKind, Expr, UnaryOperator, Value};
     match expression {
         Expr::Value(value) => matches!(
             &value.value,
             Value::Number(..) | Value::SingleQuotedString(_) | Value::Boolean(_) | Value::Null
         ),
+        Expr::Cast {
+            kind: CastKind::Cast,
+            expr,
+            data_type,
+            array: false,
+            format: None,
+        } => {
+            let target_type = data_type
+                .to_string()
+                .chars()
+                .filter(|character| !character.is_ascii_whitespace())
+                .collect::<String>()
+                .to_ascii_uppercase();
+            let supported_target = matches!(
+                target_type.as_str(),
+                "TIMESTAMP"
+                    | "TIMESTAMP(0)"
+                    | "TIMESTAMP(1)"
+                    | "TIMESTAMP(2)"
+                    | "TIMESTAMP(3)"
+                    | "TIMESTAMP(4)"
+                    | "TIMESTAMP(5)"
+                    | "TIMESTAMP(6)"
+                    | "TIMESTAMPWITHTIMEZONE"
+                    | "TIMESTAMPWITHOUTTIMEZONE"
+                    | "TIMESTAMPTZ"
+                    | "TIMESTAMPNTZ"
+                    | "TIMESTAMP_NTZ"
+                    | "TIMESTAMP_LTZ"
+            ) || decimal_type_supported(&target_type);
+            let string_source = matches!(
+                expr.as_ref(),
+                Expr::Value(value) if matches!(&value.value, Value::SingleQuotedString(_))
+            );
+            supported_target && string_source
+        }
         Expr::UnaryOp {
             op: UnaryOperator::Plus | UnaryOperator::Minus,
             expr,
@@ -1414,18 +2228,29 @@ fn render_connect_projection(
     expression: &ConnectExpression,
     plan_aliases: &HashMap<i64, i64>,
 ) -> Result<String, ExecutionError> {
+    if let ConnectExpression::ExpressionString(expression) = expression {
+        let (expression, alias) = render_connect_expression_string(expression, true)?;
+        return Ok(match alias {
+            Some(alias) => format!(
+                "{expression} AS {}",
+                quote_identifier(validate_identifier(&alias)?)
+            ),
+            None => expression,
+        });
+    }
     if let ConnectExpression::Alias {
-        expression,
+        expression: alias_expression,
         names,
-        metadata,
+        ..
     } = expression
     {
-        if names.len() != 1 || metadata.as_deref().is_some_and(|metadata| metadata != "{}") {
+        if names.len() != 1 {
             return Err(failure(
                 "CONNECT_ALIAS_UNSUPPORTED",
-                "projection aliases require one output name and empty metadata",
+                "projection aliases require one output name",
             ));
         }
+        let _ = expression_alias_metadata(expression)?;
         let name = names.first().ok_or_else(|| {
             failure(
                 "CONNECT_ALIAS_UNSUPPORTED",
@@ -1433,7 +2258,7 @@ fn render_connect_projection(
             )
         })?;
         let expression = render_connect_expression(
-            expression.as_deref().ok_or_else(|| {
+            alias_expression.as_deref().ok_or_else(|| {
                 failure(
                     "CONNECT_ALIAS_UNSUPPORTED",
                     "projection alias expression is required",
@@ -1447,6 +2272,139 @@ fn render_connect_projection(
         ));
     }
     render_connect_expression(expression, plan_aliases)
+}
+
+fn render_connect_aggregate_projection(
+    expression: &ConnectExpression,
+    plan_aliases: &HashMap<i64, i64>,
+    input_schema: &StructType,
+) -> Result<String, ExecutionError> {
+    let _ = expression_alias_metadata(expression)?;
+    let (aggregate, alias) = match expression {
+        ConnectExpression::Alias {
+            expression: Some(inner),
+            names,
+            ..
+        } if names.len() == 1 => (inner.as_ref(), names.first().map(String::as_str)),
+        ConnectExpression::Alias { .. } => {
+            return Err(failure(
+                "CONNECT_ALIAS_UNSUPPORTED",
+                "aggregate aliases require one name and supported metadata",
+            ));
+        }
+        expression => (expression, None),
+    };
+    let rendered = match aggregate {
+        ConnectExpression::Function {
+            name, arguments, ..
+        } if name.eq_ignore_ascii_case("sum") => {
+            let argument = arguments
+                .first()
+                .ok_or_else(|| failure("CONNECT_AGGREGATE_ARITY", "sum requires one argument"))?;
+            if arguments.len() != 1 {
+                return Err(failure(
+                    "CONNECT_AGGREGATE_ARITY",
+                    "sum requires one argument",
+                ));
+            }
+            let source =
+                source_field_for_expression(argument, input_schema, None).ok_or_else(|| {
+                    failure(
+                        "CONNECT_AGGREGATE_UNSUPPORTED",
+                        "sum requires a resolvable input column",
+                    )
+                })?;
+            let (_, sql_type) = spark_sum_type(&source.data_type)?;
+            let argument = render_connect_expression(argument, plan_aliases)?;
+            format!("CAST(SUM({argument}) AS {sql_type})")
+        }
+        ConnectExpression::Function { name, .. } if name.eq_ignore_ascii_case("count") => {
+            render_connect_expression(aggregate, plan_aliases)?
+        }
+        _ => {
+            return Err(failure(
+                "CONNECT_AGGREGATE_UNSUPPORTED",
+                "DuckDB execution enables count and sum aggregates only",
+            ));
+        }
+    };
+    Ok(match alias {
+        Some(alias) => format!(
+            "{rendered} AS {}",
+            quote_identifier(validate_identifier(alias)?)
+        ),
+        None => rendered,
+    })
+}
+
+fn render_connect_expression_string(
+    expression: &str,
+    allow_alias: bool,
+) -> Result<(String, Option<String>), ExecutionError> {
+    const MAX_EXPRESSION_BYTES: usize = 4096;
+    if expression.len() > MAX_EXPRESSION_BYTES {
+        return Err(failure(
+            "CONNECT_EXPRESSION_LIMIT",
+            "Connect expression exceeds 4096 bytes",
+        ));
+    }
+    let sql = format!("SELECT {expression}");
+    let statement = robin_sparkless_sql::parse_statement(&sql)
+        .map_err(|error| failure("CONNECT_EXPRESSION_INVALID", &error.to_string()))?;
+    let StatementPlan::Query(query) = robin_sparkless_sql::lower_statement(&statement)
+        .map_err(|error| failure("CONNECT_EXPRESSION_UNSUPPORTED", &error.to_string()))?
+    else {
+        return Err(failure(
+            "CONNECT_EXPRESSION_UNSUPPORTED",
+            "Connect expression must contain one scalar expression",
+        ));
+    };
+    let RelationalNode::Select(select) = &query.body else {
+        return Err(failure(
+            "CONNECT_EXPRESSION_UNSUPPORTED",
+            "Connect expression must contain one scalar expression",
+        ));
+    };
+    let no_grouping = matches!(
+        &select.group_by,
+        GroupByPlan::Expressions {
+            expressions,
+            modifiers
+        } if expressions.is_empty() && modifiers.is_empty()
+    );
+    if query.recursive
+        || !query.ctes.is_empty()
+        || !query.order_by.is_empty()
+        || query.limit.is_some()
+        || query.offset.is_some()
+        || select.distinct.is_some()
+        || !select.from.is_empty()
+        || select.filter.is_some()
+        || !no_grouping
+        || select.having.is_some()
+        || select.projection.len() != 1
+    {
+        return Err(failure(
+            "CONNECT_EXPRESSION_UNSUPPORTED",
+            "Connect expression must contain exactly one scalar expression without query clauses",
+        ));
+    }
+    let Projection::Expression { expression, alias } = &select.projection[0] else {
+        return Err(failure(
+            "CONNECT_EXPRESSION_UNSUPPORTED",
+            "wildcard expressions are not enabled in selectExpr",
+        ));
+    };
+    if alias.is_some() && !allow_alias {
+        return Err(failure(
+            "CONNECT_EXPRESSION_UNSUPPORTED",
+            "aliases are only enabled in projection expressions",
+        ));
+    }
+    Ok((
+        render_sql_expression(expression)?,
+        alias.as_ref().map(|alias| alias.to_string()),
+    ))
 }
 
 fn render_connect_expression(
@@ -1553,12 +2511,8 @@ fn render_connect_expression(
             Ok(format!("{}({})", lower.to_ascii_uppercase(), arguments[0]))
         }
         ConnectExpression::ExpressionString(expression) => {
-            let (column, value) = crate::connect::plan::parse_filter_string(expression)
-                .map_err(|status| failure("CONNECT_FILTER_UNSUPPORTED", status.message()))?;
-            Ok(format!(
-                "{} > {value}",
-                quote_identifier(validate_identifier(&column)?)
-            ))
+            let (expression, _) = render_connect_expression_string(expression, false)?;
+            Ok(expression)
         }
         ConnectExpression::Star => Ok("*".into()),
         ConnectExpression::Alias { .. } => Err(failure(
@@ -1632,6 +2586,14 @@ fn render_sql_expression(expression: &SqlExpression) -> Result<String, Execution
                 render_sql_expression(expression)?
             ))
         }
+        ExpressionShape::IsNull {
+            expression,
+            negated,
+        } => Ok(format!(
+            "({} IS {}NULL)",
+            render_sql_expression(expression)?,
+            if *negated { "NOT " } else { "" }
+        )),
         ExpressionShape::Binary {
             operator,
             left,
@@ -1922,7 +2884,10 @@ fn failure(code: &'static str, message: &str) -> ExecutionError {
 #[cfg(test)]
 mod tests {
     use super::validate_sql_query_shape;
-    use super::{DuckDbConnectExecution, DuckDbConnectSession};
+    use super::{
+        DuckDbConnectExecution, DuckDbConnectSession, render_connect_expression_string,
+        simple_insert,
+    };
     use robin_sparkless_core::engine::CancellationToken;
     use robin_sparkless_duckdb::{
         DUCKDB_EXECUTION_MAX_BATCH_BYTES, DUCKDB_EXECUTION_MAX_BATCH_ROWS, DuckDbExecutionOwner,
@@ -1930,7 +2895,8 @@ mod tests {
     };
     use sparkless_server_core::{
         ConnectCommand, ConnectExecutionPlan, ConnectExecutionPort, ConnectExecutionRequest,
-        ConnectOperationIdentity, ConnectRelation, ConnectRelationKind, EngineSessionHandle,
+        ConnectExpression, ConnectOperationIdentity, ConnectRelation, ConnectRelationKind,
+        EngineSessionHandle,
     };
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -2014,6 +2980,81 @@ mod tests {
     }
 
     #[test]
+    fn select_expr_string_supports_checked_scalar_expressions_and_aliases() {
+        let rendered = render_connect_expression_string("id + 1 AS value", true).unwrap();
+        assert_eq!(rendered.0, "(\"id\" + 1)");
+        assert_eq!(rendered.1.as_deref(), Some("value"));
+
+        let nullable_filter = render_connect_expression_string("id IS NOT NULL", false).unwrap();
+        assert_eq!(nullable_filter.0, "(\"id\" IS NOT NULL)");
+        assert_eq!(nullable_filter.1, None);
+
+        for expression in [
+            "id + 1 FROM items",
+            "id, other",
+            "id AS value; DROP TABLE items",
+        ] {
+            assert!(
+                render_connect_expression_string(expression, true).is_err(),
+                "expected unsupported expression to be rejected: {expression}"
+            );
+        }
+    }
+
+    #[test]
+    fn connect_project_expression_string_executes_in_duckdb() {
+        let database = TempDatabase::new();
+        let owner = DuckDbExecutionOwner::open(DuckDbExecutionOwnerConfig::Local {
+            database_path: database.0.clone(),
+        })
+        .expect("local DuckDB execution owner should open");
+        let session = EngineSessionHandle::new(
+            "duckdb",
+            DuckDbConnectSession {
+                owner: Arc::new(owner),
+            },
+        );
+        let input = ConnectRelation {
+            plan_id: None,
+            kind: ConnectRelationKind::Range {
+                start: None,
+                end: 3,
+                step: 1,
+                partitions: None,
+            },
+        };
+        let relation = ConnectRelation {
+            plan_id: None,
+            kind: ConnectRelationKind::Project {
+                input: Some(Box::new(input)),
+                expressions: vec![ConnectExpression::ExpressionString(
+                    "id + 1 AS value".into(),
+                )],
+            },
+        };
+        let result = DuckDbConnectExecution
+            .execute_connect_plan(
+                &session,
+                execution_request(ConnectExecutionPlan::Root(relation), "select-expr", 11),
+            )
+            .expect("supported selectExpr should execute");
+        let schema = result.schema.expect("projection should return a schema");
+        assert_eq!(
+            schema
+                .logical_fields()
+                .iter()
+                .map(|field| field.name.as_str())
+                .collect::<Vec<_>>(),
+            ["value"]
+        );
+        let rows = result
+            .batches
+            .map(|batch| batch.expect("Arrow batch should be valid").row_count)
+            .sum::<u64>();
+        assert_eq!(rows, 3);
+    }
+
+    #[test]
     fn connect_commands_and_sql_queries_execute_through_the_duckdb_owner() {
         let database = TempDatabase::new();
         let owner = DuckDbExecutionOwner::open(DuckDbExecutionOwnerConfig::Local {
@@ -2077,5 +3118,41 @@ mod tests {
             .map(|batch| batch.expect("Arrow batch should be valid").row_count)
             .sum::<u64>();
         assert_eq!(rows, 2);
+    }
+
+    #[test]
+    fn insert_values_allow_explicit_typed_casts() {
+        for (sql, expected) in [
+            (
+                "INSERT INTO items VALUES (CAST('2026-10-30 12:34:56.123456' AS TIMESTAMP))",
+                true,
+            ),
+            (
+                "INSERT INTO items VALUES (CAST('0.999999' AS DECIMAL(18, 6)))",
+                true,
+            ),
+            (
+                "INSERT INTO items VALUES (TRY_CAST('2026-10-30 12:34:56' AS TIMESTAMP))",
+                false,
+            ),
+            (
+                "INSERT INTO items VALUES (CAST('2026-10-30' AS DATE))",
+                false,
+            ),
+            (
+                "INSERT INTO items VALUES (CAST('1' AS DECIMAL(39, 0)))",
+                false,
+            ),
+        ] {
+            let robin_sparkless_sql::SparkStatement::Sqlparser(statement) =
+                robin_sparkless_sql::parse_statement(sql).expect("SQL should parse")
+            else {
+                panic!("INSERT should use the SQL parser");
+            };
+            let robin_sparkless_sql::ast::Statement::Insert(insert) = statement.as_ref() else {
+                panic!("statement should be INSERT");
+            };
+            assert_eq!(simple_insert(insert), expected, "{sql}");
+        }
     }
 }

@@ -183,6 +183,10 @@ pub enum ExpressionShape {
         operator: String,
         expression: Box<SqlExpression>,
     },
+    IsNull {
+        expression: Box<SqlExpression>,
+        negated: bool,
+    },
     Binary {
         operator: String,
         left: Box<SqlExpression>,
@@ -515,6 +519,14 @@ fn lower_expression(expr: &Expr) -> SqlExpression {
         Expr::UnaryOp { op, expr } => ExpressionShape::Unary {
             operator: op.to_string(),
             expression: Box::new(lower_expression(expr)),
+        },
+        Expr::IsNull(expr) => ExpressionShape::IsNull {
+            expression: Box::new(lower_expression(expr)),
+            negated: false,
+        },
+        Expr::IsNotNull(expr) => ExpressionShape::IsNull {
+            expression: Box::new(lower_expression(expr)),
+            negated: true,
         },
         Expr::BinaryOp { left, op, right } => ExpressionShape::Binary {
             operator: op.to_string(),
