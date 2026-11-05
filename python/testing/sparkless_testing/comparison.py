@@ -419,7 +419,7 @@ def _compare_schemas(actual_schema: Any, expected_schema: Any) -> bool:
 def _compare_types(actual_type: Any, expected_type: Any) -> bool:
     """Compare primitive and nested Spark-compatible data types."""
     if actual_type is None or expected_type is None:
-        return False
+        return actual_type is expected_type
 
     actual_kind = _type_kind(actual_type)
     expected_kind = _type_kind(expected_type)
@@ -429,7 +429,9 @@ def _compare_types(actual_type: Any, expected_type: Any) -> bool:
     if actual_kind == "decimal":
         actual_precision, actual_scale = _decimal_parameters(actual_type)
         expected_precision, expected_scale = _decimal_parameters(expected_type)
-        return actual_precision == expected_precision and actual_scale == expected_scale
+        return bool(
+            actual_precision == expected_precision and actual_scale == expected_scale
+        )
 
     if actual_kind == "struct":
         return _compare_schemas(actual_type, expected_type)
@@ -466,8 +468,9 @@ def _compare_types(actual_type: Any, expected_type: Any) -> bool:
             )
         )
 
-    return _normalize_type_name(_type_name(actual_type)) == _normalize_type_name(
-        _type_name(expected_type)
+    return bool(
+        _normalize_type_name(_type_name(actual_type))
+        == _normalize_type_name(_type_name(expected_type))
     )
 
 
