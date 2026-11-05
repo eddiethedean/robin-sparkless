@@ -764,6 +764,8 @@ mod tests {
     use robin_sparkless_core::engine::CancellationToken;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{Arc, Barrier};
+    use std::thread;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     static NEXT_DATABASE_ID: AtomicU64 = AtomicU64::new(0);
@@ -906,6 +908,116 @@ mod tests {
             })
             .expect("table should remain queryable after reopening");
         assert_eq!(rows, 2, "replay must not apply the insert twice");
+    }
+
+    #[test]
+    fn failed_statement_rolls_back_effects_and_does_not_reserve_the_operation_identity() {
+        let database = TempDatabase::new();
+        let owner = local_owner(&database);
+        let token = CancellationToken::new();
+
+        let failure = owner
+            .execute_transaction(
+                "CREATE TABLE main.rollback_items (id BIGINT); INSERT INTO main.rollback_items VALUES (1); INSERT INTO main.table_that_does_not_exist VALUES (2)",
+                "retry-after-statement-failure",
+                &[1; 32],
+                &token,
+            )
+            .expect_err("the final statement should fail");
+        assert!(failure.to_string().contains("does not exist"));
+
+        let connection = owner
+            .connection
+            .lock()
+            .expect("owner connection should be available");
+        let created_tables = connection
+            .query_row(
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'main' AND table_name = 'rollback_items'",
+                [],
+                |row| row.get::<_, u64>(0),
+            )
+            .expect("catalog should be queryable after rollback");
+        assert_eq!(created_tables, 0, "failed transaction must remove its DDL");
+        drop(connection);
+
+        assert_eq!(
+            owner
+                .execute_transaction(
+                    "CREATE TABLE main.rollback_items (id BIGINT)",
+                    "retry-after-statement-failure",
+                    &[2; 32],
+                    &token,
+                )
+                .expect("the identity should be reusable when no receipt committed"),
+            DuckDbTransactionOutcome::Committed
+        );
+    }
+
+    #[test]
+    fn concurrent_retries_with_the_same_identity_apply_one_write() {
+        let database = TempDatabase::new();
+        let owner = Arc::new(local_owner(&database));
+        let token = CancellationToken::new();
+        owner
+            .execute_transaction(
+                "CREATE TABLE main.concurrent_items (id BIGINT)",
+                "create-concurrent-items",
+                &[3; 32],
+                &token,
+            )
+            .expect("table should be created");
+
+        let workers = 8;
+        let barrier = Arc::new(Barrier::new(workers));
+        let handles = (0..workers)
+            .map(|_| {
+                let owner = Arc::clone(&owner);
+                let barrier = Arc::clone(&barrier);
+                let token = token.clone();
+                thread::spawn(move || {
+                    barrier.wait();
+                    owner.execute_transaction(
+                        "INSERT INTO main.concurrent_items VALUES (42)",
+                        "append-concurrent-item",
+                        &[4; 32],
+                        &token,
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let outcomes = handles
+            .into_iter()
+            .map(|handle| handle.join().expect("write worker should not panic"))
+            .collect::<Result<Vec<_>, _>>()
+            .expect("all identical retries should commit or replay");
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|outcome| **outcome == DuckDbTransactionOutcome::Committed)
+                .count(),
+            1,
+            "exactly one request should apply the write"
+        );
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|outcome| **outcome == DuckDbTransactionOutcome::Replayed)
+                .count(),
+            workers - 1,
+            "all remaining requests should use the committed receipt"
+        );
+
+        let connection = owner
+            .connection
+            .lock()
+            .expect("owner connection should be available");
+        let rows = connection
+            .query_row("SELECT COUNT(*) FROM main.concurrent_items", [], |row| {
+                row.get::<_, u64>(0)
+            })
+            .expect("table should remain queryable");
+        assert_eq!(rows, 1, "concurrent replay must not duplicate the row");
     }
 
     #[test]

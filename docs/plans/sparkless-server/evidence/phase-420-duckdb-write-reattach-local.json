@@ -1,0 +1,36 @@
+{
+  "format_version": 1,
+  "phase": "4.20",
+  "gate": "V38 partial: committed-write response reattachment with a local owner",
+  "result": "passed",
+  "run_date_utc": "2026-11-05",
+  "source_revision": "6b8199451b9a46fee02111e92784a0471e499256",
+  "platform": "macOS 26.5.2 arm64",
+  "runtime": {
+    "python": "3.11.15",
+    "pyspark_client": "4.0.5",
+    "duckdb": "1.5.1",
+    "grpcio": "1.85.0"
+  },
+  "server": {
+    "path": "target/debug/sparkless-server-duckdb",
+    "sha256": "d6613963776a8e19da068d3543fa3d7ed442171ecb9c71e44e64bdb47f9a3f0b"
+  },
+  "runner": {
+    "path": "tests/connect/smoke_phase420_duckdb_write_reattach.py",
+    "sha256": "3a849b909a776c1a4af1388bffeaa813f0a4b4fbf5408025de3cec1417b62bd6"
+  },
+  "workload": {
+    "request": "INSERT INTO replay_items VALUES (42)",
+    "fault": "UNAVAILABLE after the first ExecutePlan response",
+    "recovery": "ReattachExecute with the same session and operation ID",
+    "standalone_duckdb_rows_after_server_shutdown": [[42]],
+    "asserted_single_application": true
+  },
+  "command": "PYTHONPATH=python/server-duckdb:python/connect /tmp/sparkless-phase420-client-py311/bin/python tests/connect/smoke_phase420_duckdb_write_reattach.py --server-bin target/debug/sparkless-server-duckdb",
+  "limitations": [
+    "The local owner is exercised; shared Quack ownership is not exercised.",
+    "The server remains alive during reattachment; server-crash recovery and unknown commit outcomes remain unproven.",
+    "This smoke does not close the complete V38 lifecycle matrix."
+  ]
+}

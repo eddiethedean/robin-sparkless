@@ -73,6 +73,20 @@ The script creates a temporary database and removes it on exit. Its pass is loca
 evidence; it does not close the result/schema matrix, transaction fault injection, or shared-owner
 gates.
 
+### DuckDB committed-write reattachment
+
+This fault-injection smoke creates a DuckDB table, submits an `INSERT` through the native Connect
+service, drops the response stream after its first response, reattaches with the same operation ID,
+and verifies the row through the standalone DuckDB client after the server stops. It uses the local
+single-process owner and does not simulate a server crash or certify the shared Quack owner.
+
+```sh
+PYTHONPATH=python/server-duckdb:python/connect \
+  /tmp/sparkless-connect-client-py311/bin/python \
+  tests/connect/smoke_phase420_duckdb_write_reattach.py \
+  --server-bin target/debug/sparkless-server-duckdb
+```
+
 ## Phase 4.20 Spark result and schema comparison
 
 Use the pinned Apache Spark 4.0.5 distribution and the ordinary
