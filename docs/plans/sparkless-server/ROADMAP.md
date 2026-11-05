@@ -51,7 +51,7 @@ This policy supersedes the earlier exception allowing `spark-sql-parser` to rema
 | **4.17** | **4.17.0** | 1 | Shared catalog ownership, controlled mutations, richer logical schemas, and lazy native execution improvements |
 | **4.18** | **4.18.0** | 2 | Supported JVM-free Spark Connect, typed Arrow streaming, replay/release lifecycle, and standalone unmodified-client conformance |
 | **4.19** | **4.19.0** | 3, optional capability; Connect/engine performance | DuckDB data source: typed Arrow table scans feeding the existing Polars engine; optional `SparklessConnect` context manager; Arrow export, range-count, and mixed-job scheduling improvements (#1736–#1738) |
-| **4.20** | **4.20.0** | 4, optional capability | DuckDB execution backend exposed through Sparkless's supported Connect server |
+| **4.20** | **4.20.0** | 4, optional capability and performance | DuckDB execution backend exposed through Sparkless's supported Connect server, engine and server performance follow-ups (#1739–#1743), and `sparkless-testing` schema comparison correctness (#1746) |
 | **4.21** | **4.21.0** | 5, optional capability | Isolated Python Jobs/notebooks and scalar/Pandas UDF workers |
 | **4.22** | **4.22.0** | 6, optional capability | Native Delta Lake / Unity Catalog interoperability |
 | **4.23** | **4.23.0** | 7 | Complete existing native local SQL/DataFrame/functions/types baseline on Connect and HTTP SQL, analysis and session configuration (SS-16/22) |
@@ -231,9 +231,9 @@ Follow the [shared performance protocol](RELEASE_4_19.md#performance-protocol-an
 
 ## 4.20.0 — Optional DuckDB execution backend for Connect
 
-Complete **Phase 4** after the Phase 3 source/ownership foundations. DuckDB now executes the advertised SQL/DataFrame plans and owns persistent table writes behind the existing Sparkless Connect endpoint. Polars remains the default backend; engine selection is explicit and fixed for a server instance's operations.
+Target **Phase 4** after the Phase 3 source and ownership gates. The planned DuckDB mode executes the declared SQL and DataFrame subset and owns persistent writes through the existing Sparkless Connect endpoint. Polars remains the default. Operators select the backend at startup for the lifetime of the server instance.
 
-Primary plan: [SS-15: DuckDB Connect backend](15-duckdb-connect-backend.md), with ordered slices 420-01–420-06.
+Primary plan: [SS-15: DuckDB Connect backend](15-duckdb-connect-backend.md). [Delivery order](15-duckdb-connect-backend.md#delivery-order-and-dependencies) starts with D15 and backend readiness, then adds reads, writes, and shared-owner lifecycle proof. [Performance slices 420-07–420-11](15-duckdb-connect-backend.md#performance-follow-ups) and the `sparkless-testing` fix can proceed independently of DuckDB execution. Integrate them in 420-05 for the coordinated release.
 
 Build on the separate DuckDB product and neutral server boundaries delivered under 4.19 SS-23/D22. Do not create another server/launcher stack or infer execution support from the already shipped source-enabled product name. D15 still owns actual DuckDB execution semantics and lifecycle proof.
 
@@ -246,12 +246,13 @@ Build on the separate DuckDB product and neutral server boundaries delivered und
 
 ### Release gate
 
-- [ ] Phase 3 is complete; earlier Polars and optional source capabilities retain their tested behavior.
+- [ ] Freeze D15 and record V35/V36 source acceptance and applicable V59 evidence. Rerun earlier Polars and optional source regressions.
 - [ ] **V37** proves the declared SQL/DataFrame/analysis/type matrix through unmodified Connect clients, pinned reference semantics, and explicit unsupported results.
 - [ ] **V38** proves truthful transactional effects/receipts, duplicate/conflicting identities, deadline/commit/disconnect/cancel/restart cases, independent client read/write visibility, and numeric multi-client resource budgets.
 - [ ] Applicable V19–V24 lifecycle checks pass for DuckDB; V25 remains supplemental for any advertised third-party route. Reattach must not reexecute a query or mutation.
-- [ ] Optional dependency/build/platform boundaries, clean enabled/default installs, and public artifact verification pass at coordinated **4.20.0**. Neither server runtime requires Python or a JVM.
+- [ ] The [candidate and post-publication checks](15-duckdb-connect-backend.md#acceptance-and-release-gates) pass at their respective stages for coordinated **4.20.0**, including both backend modes, clean installs, platform coverage, and public inventory verification.
 - [ ] **420-06 / #1746** passes comparison regression coverage on Sparkless and PySpark, including empty mapping expectations; publish the corrected `sparkless-testing` package at coordinated **4.20.0**.
+- [ ] [**420-07–420-11 / #1739–#1743**](15-duckdb-connect-backend.md#performance-follow-ups) meet their correctness and resource criteria, with paired release benchmarks that isolate each optimization and retain the small-job guardrails.
 
 ## 4.21.0 — Optional isolated Python workers
 
