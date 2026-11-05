@@ -1105,25 +1105,60 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
+          last_new_publish=$(date -u +%s)
           publish_one() {
             local crate="$1"
             local out
             local code
-            set +e
-            out=$(cargo publish --locked --no-verify -p "$crate" --token "$CARGO_REGISTRY_TOKEN" 2>&1)
-            code=$?
-            set -e
-            printf '%s\n' "$out"
-            if [ "$code" -eq 0 ]; then
-              return 0
-            fi
-            # cargo uses exit 101 for many failures; only skip true duplicates.
-            if printf '%s\n' "$out" | grep -Fqi -e 'already uploaded' -e 'already exists on crates.io index'; then
-              echo "$crate version already on crates.io, skipping"
-              return 0
-            fi
-            echo "cargo publish -p $crate failed with exit $code"
-            return "$code"
+            local attempt=1
+            local retry_after
+            local retry_epoch
+            local now
+            local wait_seconds
+            local max_attempts=6
+            while (( attempt <= max_attempts )); do
+              now=$(date -u +%s)
+              wait_seconds=$((last_new_publish + 300 - now))
+              if (( wait_seconds > 0 )); then
+                echo "Waiting ${wait_seconds}s before the next crate publish (minimum 5 minutes)."
+                sleep "$wait_seconds"
+              fi
+
+              set +e
+              out=$(cargo publish --locked --no-verify -p "$crate" --token "$CARGO_REGISTRY_TOKEN" 2>&1)
+              code=$?
+              set -e
+              printf '%s\n' "$out"
+              if [ "$code" -eq 0 ]; then
+                last_new_publish=$(date -u +%s)
+                return 0
+              fi
+              # cargo uses exit 101 for many failures; only skip true duplicates.
+              if printf '%s\n' "$out" | grep -Fqi -e 'already uploaded' -e 'already exists on crates.io index'; then
+                echo "$crate version already on crates.io, skipping"
+                return 0
+              fi
+              if printf '%s\n' "$out" | grep -Fqi '429 Too Many Requests'; then
+                retry_after=$(printf '%s\n' "$out" | sed -n 's/.*Please try again after \(.*\) and see .*/\1/p' | head -n 1)
+                if [[ -z "$retry_after" ]]; then
+                  echo "crates.io rate-limited $crate without a retry time"
+                  return "$code"
+                fi
+                retry_epoch=$(date -u -d "$retry_after" +%s)
+                now=$(date -u +%s)
+                wait_seconds=$((retry_epoch - now + 5))
+                if (( wait_seconds > 0 )); then
+                  echo "crates.io rate-limited $crate; retrying at its requested retry time in ${wait_seconds}s."
+                  sleep "$wait_seconds"
+                fi
+                attempt=$((attempt + 1))
+                continue
+              fi
+              echo "cargo publish -p $crate failed with exit $code"
+              return "$code"
+            done
+            echo "cargo publish -p $crate remained rate-limited after $max_attempts attempts"
+            return 1
           }
 
           publish_one spark-sql-parser

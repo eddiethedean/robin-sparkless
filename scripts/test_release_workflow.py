@@ -370,6 +370,19 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 for project in projects:
                     self.assertIn(project, script)
 
+    def test_rust_publisher_paces_new_crates_and_honors_rate_limits(self):
+        jobs = workflow("release.yml")["jobs"]
+        script = next(
+            step["run"]
+            for step in jobs["publish"]["steps"]
+            if step.get("name") == "Publish to crates.io in dependency order"
+        )
+        self.assertIn("last_new_publish", script)
+        self.assertIn("sleep \"$wait_seconds\"", script)
+        self.assertIn("last_new_publish + 300", script)
+        self.assertIn("429 Too Many Requests", script)
+        self.assertIn("Please try again after", script)
+
     def test_testing_package_is_staged_and_published_before_the_api(self):
         jobs = workflow("release.yml")["jobs"]
         self.assertIn("publish-testing", jobs)

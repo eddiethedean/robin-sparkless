@@ -166,7 +166,12 @@ def verify_published_inputs(
     entries = list(directory.iterdir())
     if any(not item.is_file() for item in entries):
         raise ValueError("publisher input directory contains a non-file entry")
-    actual_paths = entries
+    # Trusted Publishing can add these sidecars after upload. They are
+    # attestations, not package distributions, so they do not belong in the
+    # candidate's distribution inventory.
+    actual_paths = [
+        item for item in entries if not item.name.endswith(".publish.attestation")
+    ]
     actual_names = {item.name for item in actual_paths}
     if actual_names != set(expected):
         raise ValueError(
