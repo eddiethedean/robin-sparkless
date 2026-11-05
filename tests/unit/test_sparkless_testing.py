@@ -539,16 +539,36 @@ class TestComparisonDataFrames:
         assert result.equivalent is True
 
     def test_compare_dataframes_with_empty_dict_data(self, spark):
-        """compare_dataframes handles empty dict data with column mismatch."""
+        """Unknown columns are skipped when empty mapping data has no schema."""
         from sparkless_testing import compare_dataframes
 
         df1 = spark.createDataFrame([], "id: int")
         expected = {"data": []}
 
-        # Empty expected data has no columns, so there's a column mismatch
         result = compare_dataframes(df1, expected)
         assert result.row_count_match is True
-        assert result.column_match is False  # No columns in empty expected
+        assert result.column_match is True  # Empty data has no inferable columns
+
+    def test_compare_dataframes_checks_schema_and_columns_when_row_counts_differ(
+        self, spark
+    ):
+        """A row-count mismatch must not hide schema or column differences."""
+        from sparkless_testing import compare_dataframes
+
+        actual = spark.createDataFrame([(1,)], "id: long")
+        expected = {
+            "schema": [{"name": "other", "type": "long"}],
+            "data": [],
+        }
+
+        result = compare_dataframes(actual, expected)
+
+        assert result.row_count_match is False
+        assert result.schema_match is False
+        assert result.column_match is False
+        assert any("Row count mismatch" in error for error in result.errors)
+        assert "Schema mismatch" in result.errors
+        assert any("Column mismatch" in error for error in result.errors)
 
     def test_compare_dataframes_both_empty(self, spark):
         """compare_dataframes handles two empty DataFrames."""
@@ -581,7 +601,9 @@ class TestComparisonDataFrames:
         result = compare_dataframes(df1, df2, check_schema=False)
         assert result.equivalent is True
 
-    def test_compare_dataframes_detects_nullability_difference(self, spark, spark_imports):
+    def test_compare_dataframes_detects_nullability_difference(
+        self, spark, spark_imports
+    ):
         """Schema comparison includes top-level field nullability."""
         from sparkless_testing import compare_dataframes
 

@@ -874,14 +874,20 @@ fn validate_sql_query_shape(sql: &str) -> Result<(), ExecutionError> {
 }
 
 fn validate_sql_query_ast(query: &robin_sparkless_sql::ast::Query) -> Result<(), ExecutionError> {
-    use robin_sparkless_sql::ast::{LimitClause, SelectFlavor, SelectItem, SetExpr};
+    use robin_sparkless_sql::ast::{Expr, LimitClause, SelectFlavor, SelectItem, SetExpr, Value};
     let supported_limit = match &query.limit_clause {
         None => true,
         Some(LimitClause::LimitOffset {
-            limit: Some(_),
+            limit: Some(Expr::Value(value)),
             offset: None,
             limit_by,
-        }) => limit_by.is_empty(),
+        }) => {
+            limit_by.is_empty()
+                && matches!(
+                    &value.value,
+                    Value::Number(number, _) if number.parse::<i64>().is_ok_and(|number| number >= 0)
+                )
+        }
         Some(LimitClause::LimitOffset { .. } | LimitClause::OffsetCommaLimit { .. }) => false,
     };
     if query.with.is_some()
@@ -896,7 +902,7 @@ fn validate_sql_query_ast(query: &robin_sparkless_sql::ast::Query) -> Result<(),
     {
         return Err(failure(
             "CONNECT_SQL_UNSUPPORTED",
-            "CTEs, ordering, OFFSET, LIMIT ALL, comma-form limits, LIMIT BY, FETCH, locking, query settings, formats, and pipes are not enabled",
+            "CTEs, ordering, OFFSET, comma-form limits, LIMIT BY, FETCH, locking, query settings, formats, and pipes are not enabled",
         ));
     }
     let SetExpr::Select(select) = query.body.as_ref() else {
@@ -1910,5 +1916,166 @@ fn failure(code: &'static str, message: &str) -> ExecutionError {
         code,
         message: message.to_string(),
         details: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_sql_query_shape;
+    use super::{DuckDbConnectExecution, DuckDbConnectSession};
+    use robin_sparkless_core::engine::CancellationToken;
+    use robin_sparkless_duckdb::{
+        DUCKDB_EXECUTION_MAX_BATCH_BYTES, DUCKDB_EXECUTION_MAX_BATCH_ROWS, DuckDbExecutionOwner,
+        DuckDbExecutionOwnerConfig,
+    };
+    use sparkless_server_core::{
+        ConnectCommand, ConnectExecutionPlan, ConnectExecutionPort, ConnectExecutionRequest,
+        ConnectOperationIdentity, ConnectRelation, ConnectRelationKind, EngineSessionHandle,
+    };
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static NEXT_DATABASE_ID: AtomicU64 = AtomicU64::new(0);
+
+    struct TempDatabase(PathBuf);
+
+    impl TempDatabase {
+        fn new() -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock must be after Unix epoch")
+                .as_nanos();
+            Self(std::env::temp_dir().join(format!(
+                "sparkless-connect-duckdb-{}-{unique}-{}.duckdb",
+                std::process::id(),
+                NEXT_DATABASE_ID.fetch_add(1, Ordering::Relaxed)
+            )))
+        }
+    }
+
+    impl Drop for TempDatabase {
+        fn drop(&mut self) {
+            let wal_path = PathBuf::from(format!("{}.wal", self.0.display()));
+            let _ = std::fs::remove_file(&self.0);
+            let _ = std::fs::remove_file(wal_path);
+        }
+    }
+
+    fn execution_request(
+        plan: ConnectExecutionPlan,
+        key: &str,
+        fingerprint: u8,
+    ) -> ConnectExecutionRequest {
+        ConnectExecutionRequest {
+            plan,
+            operation_identity: ConnectOperationIdentity {
+                key: key.to_string(),
+                request_fingerprint: [fingerprint; 32],
+            },
+            max_batch_rows: DUCKDB_EXECUTION_MAX_BATCH_ROWS,
+            max_response_bytes: DUCKDB_EXECUTION_MAX_BATCH_BYTES,
+            cancellation: CancellationToken::new(),
+        }
+    }
+
+    #[test]
+    fn sql_shape_accepts_the_declared_subset_and_nested_derived_queries() {
+        for sql in [
+            "SELECT * FROM items",
+            // sqlparser normalizes LIMIT ALL to no limit, which has identical semantics.
+            "SELECT * FROM items LIMIT ALL",
+            "SELECT t.* FROM items AS t LIMIT 10",
+            "SELECT id FROM (SELECT id FROM items) AS nested",
+        ] {
+            assert!(
+                validate_sql_query_shape(sql).is_ok(),
+                "expected supported SQL shape: {sql}"
+            );
+        }
+    }
+
+    #[test]
+    fn sql_shape_rejects_clauses_the_lowered_plan_cannot_preserve() {
+        for sql in [
+            "WITH source AS (SELECT 1 AS id) SELECT id FROM source",
+            "SELECT * FROM items ORDER BY id",
+            "SELECT * FROM items LIMIT 10 OFFSET 1",
+            "SELECT * FROM items LIMIT 1, 10",
+            "SELECT * EXCLUDE (id) FROM items",
+            "SELECT * FROM items AS t (renamed)",
+        ] {
+            assert!(
+                validate_sql_query_shape(sql).is_err(),
+                "expected unsupported SQL shape to be rejected: {sql}"
+            );
+        }
+    }
+
+    #[test]
+    fn connect_commands_and_sql_queries_execute_through_the_duckdb_owner() {
+        let database = TempDatabase::new();
+        let owner = DuckDbExecutionOwner::open(DuckDbExecutionOwnerConfig::Local {
+            database_path: database.0.clone(),
+        })
+        .expect("local DuckDB execution owner should open");
+        let session = EngineSessionHandle::new(
+            "duckdb",
+            DuckDbConnectSession {
+                owner: Arc::new(owner),
+            },
+        );
+        let execution = DuckDbConnectExecution;
+
+        for (sql, key, fingerprint) in [
+            ("CREATE TABLE items (id BIGINT)", "create-items", 1),
+            ("INSERT INTO items VALUES (1), (2)", "insert-items", 2),
+        ] {
+            let result = execution
+                .execute_connect_plan(
+                    &session,
+                    execution_request(
+                        ConnectExecutionPlan::Command(ConnectCommand::Sql {
+                            sql: sql.to_string(),
+                        }),
+                        key,
+                        fingerprint,
+                    ),
+                )
+                .expect("supported Connect write should execute");
+            assert!(result.schema.is_none());
+            assert_eq!(result.batches.count(), 0);
+        }
+
+        let relation = ConnectRelation {
+            plan_id: Some(1),
+            kind: ConnectRelationKind::Sql {
+                query:
+                    "SELECT i.id, ABS(i.id) AS magnitude FROM items AS i WHERE i.id >= 1 LIMIT 10"
+                        .into(),
+                has_arguments: false,
+            },
+        };
+        let result = execution
+            .execute_connect_plan(
+                &session,
+                execution_request(ConnectExecutionPlan::Root(relation), "read-items", 3),
+            )
+            .expect("supported SQL relation should execute in DuckDB");
+        let schema = result.schema.expect("read should return an output schema");
+        assert_eq!(
+            schema
+                .logical_fields()
+                .iter()
+                .map(|field| field.name.as_str())
+                .collect::<Vec<_>>(),
+            ["id", "magnitude"]
+        );
+        let rows = result
+            .batches
+            .map(|batch| batch.expect("Arrow batch should be valid").row_count)
+            .sum::<u64>();
+        assert_eq!(rows, 2);
     }
 }

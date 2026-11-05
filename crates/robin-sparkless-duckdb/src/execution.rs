@@ -718,6 +718,195 @@ fn hex_digest(digest: &[u8; 32]) -> String {
     encoded
 }
 
+#[cfg(test)]
+mod tests {
+    use super::{
+        DUCKDB_EXECUTION_MAX_BATCH_BYTES, DUCKDB_EXECUTION_MAX_BATCH_ROWS, DuckDbExecutionOwner,
+        DuckDbExecutionOwnerConfig, DuckDbTransactionOutcome,
+    };
+    use robin_sparkless_core::engine::CancellationToken;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static NEXT_DATABASE_ID: AtomicU64 = AtomicU64::new(0);
+
+    struct TempDatabase(PathBuf);
+
+    impl TempDatabase {
+        fn new() -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock must be after Unix epoch")
+                .as_nanos();
+            Self(std::env::temp_dir().join(format!(
+                "sparkless-duckdb-execution-{}-{unique}-{}.duckdb",
+                std::process::id(),
+                NEXT_DATABASE_ID.fetch_add(1, Ordering::Relaxed)
+            )))
+        }
+    }
+
+    impl Drop for TempDatabase {
+        fn drop(&mut self) {
+            let wal_path = PathBuf::from(format!("{}.wal", self.0.display()));
+            let _ = std::fs::remove_file(&self.0);
+            let _ = std::fs::remove_file(wal_path);
+        }
+    }
+
+    fn local_owner(database: &TempDatabase) -> DuckDbExecutionOwner {
+        DuckDbExecutionOwner::open(DuckDbExecutionOwnerConfig::Local {
+            database_path: database.0.clone(),
+        })
+        .expect("local DuckDB owner should open")
+    }
+
+    #[test]
+    fn local_writes_commit_with_receipts_and_replay_after_reopen() {
+        let database = TempDatabase::new();
+        let token = CancellationToken::new();
+        {
+            let owner = local_owner(&database);
+            assert_eq!(
+                owner
+                    .execute_transaction(
+                        "CREATE TABLE main.items (id BIGINT)",
+                        "create-items",
+                        &[1; 32],
+                        &token,
+                    )
+                    .expect("create table should commit"),
+                DuckDbTransactionOutcome::Committed
+            );
+            assert_eq!(
+                owner
+                    .execute_transaction(
+                        "CREATE TABLE main.items (id BIGINT)",
+                        "create-items",
+                        &[1; 32],
+                        &token,
+                    )
+                    .expect("matching create should replay"),
+                DuckDbTransactionOutcome::Replayed
+            );
+            assert!(
+                owner
+                    .execute_transaction(
+                        "CREATE TABLE main.items (id BIGINT)",
+                        "create-items",
+                        &[2; 32],
+                        &token,
+                    )
+                    .is_err()
+            );
+            assert_eq!(
+                owner
+                    .execute_transaction(
+                        "INSERT INTO main.items VALUES (1), (2)",
+                        "append-items",
+                        &[3; 32],
+                        &token,
+                    )
+                    .expect("insert should commit"),
+                DuckDbTransactionOutcome::Committed
+            );
+            assert_eq!(
+                owner
+                    .execute_transaction(
+                        "INSERT INTO main.items VALUES (1), (2)",
+                        "append-items",
+                        &[3; 32],
+                        &token,
+                    )
+                    .expect("matching insert should replay"),
+                DuckDbTransactionOutcome::Replayed
+            );
+            let rows = owner
+                .connection
+                .lock()
+                .expect("owner connection should be available")
+                .query_row("SELECT COUNT(*) FROM main.items", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .expect("rows should be visible before closing the owner");
+            assert_eq!(rows, 2);
+        }
+
+        assert!(
+            database.0.is_file(),
+            "database file should exist at {:?}",
+            database.0
+        );
+        let owner = local_owner(&database);
+        let reopened_rows = owner
+            .connection
+            .lock()
+            .expect("owner connection should be available")
+            .query_row("SELECT COUNT(*) FROM main.items", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .expect("rows should be persisted when reopening the owner");
+        assert_eq!(reopened_rows, 2);
+        assert_eq!(
+            owner
+                .execute_transaction(
+                    "INSERT INTO main.items VALUES (1), (2)",
+                    "append-items",
+                    &[3; 32],
+                    &token,
+                )
+                .expect("durable receipt should replay after reopening"),
+            DuckDbTransactionOutcome::Replayed
+        );
+        let connection = owner
+            .connection
+            .lock()
+            .expect("owner connection should be available");
+        let rows = connection
+            .query_row("SELECT COUNT(*) FROM main.items", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .expect("table should remain queryable after reopening");
+        assert_eq!(rows, 2, "replay must not apply the insert twice");
+    }
+
+    #[test]
+    fn local_query_stream_returns_schema_and_bounded_arrow_batches() {
+        let database = TempDatabase::new();
+        let owner = local_owner(&database);
+        let token = CancellationToken::new();
+        let mut output_schema = None;
+        let mut row_counts = Vec::new();
+
+        owner
+            .stream_query(
+                "SELECT 1::BIGINT AS id UNION ALL SELECT 2::BIGINT AS id",
+                &token,
+                DUCKDB_EXECUTION_MAX_BATCH_ROWS,
+                DUCKDB_EXECUTION_MAX_BATCH_BYTES,
+                |schema| {
+                    output_schema = Some(schema);
+                    Ok(())
+                },
+                |batch| {
+                    row_counts.push(batch.row_count);
+                    Ok(())
+                },
+            )
+            .expect("small query should stream");
+
+        let schema = output_schema.expect("query should emit its schema");
+        assert_eq!(schema.logical_fields()[0].name, "id");
+        assert_eq!(row_counts.iter().sum::<u64>(), 2);
+        assert!(
+            row_counts
+                .iter()
+                .all(|rows| *rows <= DUCKDB_EXECUTION_MAX_BATCH_ROWS as u64)
+        );
+    }
+}
+
 fn arrow_schema_to_spark(
     schema: &arrow60::datatypes::SchemaRef,
 ) -> Result<StructType, EngineError> {

@@ -42,6 +42,21 @@ Implementation details and operator setup are summarized in the
 server behavior remain documented as 4.19.0 until 4.20 artifacts pass the
 acceptance gates below.
 
+### Local source verification (2026-11-05)
+
+On the local macOS arm64 workspace, these checks passed against the current
+source candidate:
+
+- DuckDB server and base Polars server compile with HTTP and Connect enabled.
+- `cargo test -p robin-sparkless-duckdb`: 8 passed.
+- `cargo test -p sparkless-server-polars --no-default-features --features connect,duckdb-source`: 62 passed, including local DuckDB command, SQL query, output schema, and Arrow stream coverage.
+- `PYTHONPATH=python/testing .venv/bin/python -m pytest tests/unit/test_sparkless_testing.py::TestComparisonDataFrames -q`: 16 passed.
+- Ruff format and lint checks passed for the changed Python helper and tests.
+
+These are local source checks. They do not close V37 Spark result/schema
+comparison, V38 owner fault and interoperability coverage, performance
+reports, cross-platform packaging, or exact-artifact release gates.
+
 ## D15 decision checklist
 
 The following table records the choices currently implemented in source.

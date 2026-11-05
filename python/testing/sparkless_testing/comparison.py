@@ -103,6 +103,7 @@ def compare_dataframes(
             errors.append("Schema mismatch")
 
     # Compare columns
+    column_match = True
     try:
         actual_columns = actual.columns
         if isinstance(expected, dict):
@@ -436,7 +437,9 @@ def _compare_types(actual_type: Any, expected_type: Any) -> bool:
         actual_element = _type_property(actual_type, "elementType", "element_type")
         expected_element = _type_property(expected_type, "elementType", "element_type")
         actual_nullable = _type_property(actual_type, "containsNull", "contains_null")
-        expected_nullable = _type_property(expected_type, "containsNull", "contains_null")
+        expected_nullable = _type_property(
+            expected_type, "containsNull", "contains_null"
+        )
         return _compare_types(actual_element, expected_element) and (
             expected_nullable is None
             or actual_nullable is None

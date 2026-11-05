@@ -62,7 +62,7 @@ limits. In DuckDB mode, the Connect adapter currently accepts:
 - one parsed, read-only `SELECT` relation using literals, identifiers, unary and
   binary operators, `COUNT`, `SUM`, and `ABS`; simple `*` and `alias.*`
   projections; supported `WHERE` expressions; expression `GROUP BY`; inner
-  equality/`USING` joins and `CROSS JOIN`; and a literal `LIMIT`;
+  equality/`USING` joins and `CROSS JOIN`; and a nonnegative integer `LIMIT`;
 - `CREATE TABLE` with explicitly typed columns and `INSERT INTO ... VALUES`.
 
 The SQL subset rejects CTEs, `DISTINCT`, ordering, offsets, `FETCH`, `HAVING`,
