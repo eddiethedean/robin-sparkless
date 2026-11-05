@@ -109,6 +109,7 @@ nav:
   - Run a server:
     - Spark Connect quickstart: SPARK_CONNECT.md
     - Read DuckDB tables: DUCKDB_SOURCE.md
+    - DuckDB Connect execution (4.20 candidate): DUCKDB_EXECUTION.md
     - HTTP quickstart and API: HTTP_API.md
     - Python launcher API: SERVER_PYTHON_API.md
     - Deployment and operations: PRODUCTION.md

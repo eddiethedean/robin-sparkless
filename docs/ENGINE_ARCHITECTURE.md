@@ -19,7 +19,7 @@ root `robin-sparkless` crate composes those layers and exposes the familiar
 | `robin-sparkless-delta` | Delta path normalization, snapshot loading, table creation, and transaction commits; no Polars dependency |
 | `robin-sparkless-jdbc` | Driver-neutral JDBC option parsing, URL matching, SQL identifier/dialect policy, and credential redaction |
 | `robin-sparkless-jdbc-polars` | Feature-gated database connections, JDBC reads/writes, and database-to-Polars conversion |
-| `robin-sparkless-duckdb` | Configured DuckDB source resolution, read snapshots, bounded scans, and split connection lifecycle; reads only |
+| `robin-sparkless-duckdb` | Configured DuckDB source reads plus the 4.20 candidate execution owner, bounded Arrow streams, transactional Connect writes, and operation receipts |
 | `robin-sparkless` | Concrete Polars-backed Rust facade and core/Polars exports |
 | `sparkless-native` | Python ABI, conversion, Python callback ownership, and Python exception mapping |
 | `sparkless-server-core` | Engine-neutral server configuration and SQL/Connect execution-port contracts |

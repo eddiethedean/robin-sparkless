@@ -47,6 +47,7 @@ It runs on one machine and implements a subset of PySpark behavior. Read
 | [Testing](docs/TESTING_GUIDE.md) | One test suite with Sparkless and PySpark |
 | [Spark Connect server](docs/SPARK_CONNECT.md) | Run the pinned PySpark Connect client against the supported Sparkless plan subset |
 | [DuckDB table sources](docs/DUCKDB_SOURCE.md) | Read a local DuckDB test database through Spark Connect |
+| [DuckDB Connect execution candidate](docs/DUCKDB_EXECUTION.md) | Configure the unreleased 4.20 optional DuckDB execution backend and review its limits |
 | [4.19 migration](docs/python_migration.md#from-sparkless-418-to-419) | Choose the new packages and update your imports |
 | [Rust quickstart](docs/QUICKSTART.md) | Embed the `robin-sparkless` engine |
 

@@ -78,6 +78,15 @@ finally:
   [Compare the packages](INSTALLATION.md#choose-a-package) ·
   [Upgrade from 4.18](python_migration.md#from-sparkless-418-to-419)
 
+## Unreleased 4.20 source candidate
+
+The repository now contains an optional DuckDB Connect execution path and
+performance/schema-comparison fixes planned for 4.20.0. The public packages
+remain at 4.19.0: Spark-result conformance, owner/restart behavior, performance
+measurements, and release artifact checks are still open. Review the
+[candidate execution guide](DUCKDB_EXECUTION.md) and [phase plan](plans/sparkless-server/15-duckdb-connect-backend.md);
+do not infer these capabilities from the published install.
+
 ## What to check before adopting Sparkless
 
 Sparkless implements a subset of PySpark on a single machine. The in-process

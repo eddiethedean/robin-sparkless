@@ -1946,7 +1946,7 @@ fn validate_expression_plan_id(
     Ok(())
 }
 
-fn parse_filter_string(expression: &str) -> Result<(String, i64), Status> {
+pub(super) fn parse_filter_string(expression: &str) -> Result<(String, i64), Status> {
     if expression.len() > MAX_FILTER_EXPRESSION_BYTES {
         return Err(Status::resource_exhausted(format!(
             "Connect filter expression exceeds {MAX_FILTER_EXPRESSION_BYTES} bytes"
@@ -2025,13 +2025,17 @@ fn validate_connect_scalar_schema(schema: &StructType) -> Result<(), Status> {
         let supported = matches!(
             &field.data_type,
             DataType::Boolean
+                | DataType::Byte
                 | DataType::Short
                 | DataType::Integer
                 | DataType::Long
+                | DataType::Float
                 | DataType::Double
                 | DataType::String
                 | DataType::Date
                 | DataType::Timestamp
+                | DataType::TimestampNtz
+                | DataType::Binary
         ) || matches!(&field.data_type, DataType::Decimal(p, s) if (1..=38).contains(p) && s <= p);
         if !supported {
             return Err(unsupported(format!(
@@ -2048,7 +2052,7 @@ fn validate_connect_scalar_schema(schema: &StructType) -> Result<(), Status> {
     validate_schema_width(schema)
 }
 
-fn parse_local_schema(input: &str) -> Result<StructType, Status> {
+pub(super) fn parse_local_schema(input: &str) -> Result<StructType, Status> {
     const MAX_JSON_SCHEMA_BYTES: usize = 256 * 1024;
     if input.len() > MAX_JSON_SCHEMA_BYTES {
         return Err(Status::resource_exhausted(format!(
@@ -2317,24 +2321,32 @@ fn strip_nullability(type_and_nullability: &str) -> (&str, bool) {
 
 fn parse_ddl_type(type_name: &str) -> Result<DataType, Status> {
     let upper = type_name.to_ascii_uppercase();
-    let scalar = match upper.as_str() {
-        "BOOLEAN" | "BOOL" => Some(DataType::Boolean),
-        "TINYINT" | "BYTE" => Some(DataType::Byte),
-        "SMALLINT" | "SHORT" => Some(DataType::Short),
-        "INT" | "INTEGER" => Some(DataType::Integer),
-        "BIGINT" | "LONG" => Some(DataType::Long),
-        "FLOAT" | "REAL" => Some(DataType::Float),
-        "DOUBLE" => Some(DataType::Double),
-        "STRING" => Some(DataType::String),
-        "DATE" => Some(DataType::Date),
-        "TIMESTAMP" | "TIMESTAMP_LTZ" => Some(DataType::Timestamp),
-        "TIMESTAMP_NTZ" => Some(DataType::TimestampNtz),
-        _ => None,
+    let base = upper.split('(').next().unwrap_or(&upper).trim();
+    let scalar = if upper.starts_with("TIMESTAMP") && upper.ends_with("WITHOUT TIME ZONE") {
+        Some(DataType::TimestampNtz)
+    } else {
+        match base {
+            "BOOLEAN" | "BOOL" => Some(DataType::Boolean),
+            "TINYINT" | "BYTE" => Some(DataType::Byte),
+            "SMALLINT" | "SHORT" => Some(DataType::Short),
+            "INT" | "INTEGER" => Some(DataType::Integer),
+            "BIGINT" | "LONG" => Some(DataType::Long),
+            "FLOAT" | "REAL" => Some(DataType::Float),
+            "DOUBLE" | "DOUBLE PRECISION" => Some(DataType::Double),
+            "STRING" | "VARCHAR" | "CHARACTER VARYING" | "TEXT" => Some(DataType::String),
+            "BINARY" | "VARBINARY" | "BLOB" => Some(DataType::Binary),
+            "DATE" => Some(DataType::Date),
+            "TIMESTAMP" | "TIMESTAMP_LTZ" | "TIMESTAMPTZ" | "TIMESTAMP WITH TIME ZONE" => {
+                Some(DataType::Timestamp)
+            }
+            "TIMESTAMP_NTZ" => Some(DataType::TimestampNtz),
+            _ => None,
+        }
     };
     if let Some(scalar) = scalar {
         return Ok(scalar);
     }
-    if upper.starts_with("DECIMAL(") && upper.ends_with(')') {
+    if (upper.starts_with("DECIMAL(") || upper.starts_with("NUMERIC(")) && upper.ends_with(')') {
         let body = &upper[8..upper.len() - 1];
         let (precision, scale) = body.split_once(',').ok_or_else(|| {
             Status::invalid_argument("DECIMAL requires precision and scale in Connect DDL")
@@ -2414,6 +2426,9 @@ fn data_type_to_proto(data_type: &DataType) -> Result<proto::DataType, Status> {
             type_variation_reference: 0,
         }),
         DataType::TimestampNtz => DataTypeKind::TimestampNtz(data_type::TimestampNtz {
+            type_variation_reference: 0,
+        }),
+        DataType::Binary => DataTypeKind::Binary(data_type::Binary {
             type_variation_reference: 0,
         }),
         DataType::Decimal(precision, scale) => DataTypeKind::Decimal(data_type::Decimal {

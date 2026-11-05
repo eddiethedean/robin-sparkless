@@ -27,8 +27,8 @@ pub use sparkless_server_connect::{
     status_with_standard_details,
 };
 use sparkless_server_core::{
-    ConnectExecutionPort, ConnectExecutionRequest, ConnectExecutionResult, EngineSessionHandle,
-    ExecutionError,
+    ConnectExecutionPort, ConnectExecutionRequest, ConnectExecutionResult,
+    ConnectOperationIdentity, EngineSessionHandle, ExecutionError,
 };
 use std::collections::HashMap;
 use std::future::Future;
@@ -116,7 +116,7 @@ impl ConnectExecutionPort for PolarsConnectExecution {
                 })?
         };
         Ok(ConnectExecutionResult {
-            schema: result_schema,
+            schema: Some(result_schema),
             batches,
         })
     }
@@ -284,8 +284,58 @@ fn trace_connect_arrow_response(bytes: usize, rows: i64, start_offset: u64) {
 
 mod analysis;
 mod config;
+#[cfg(feature = "duckdb-source")]
+mod duckdb;
 mod normalize;
 mod plan;
+
+#[cfg(feature = "duckdb-source")]
+pub(super) use duckdb::DuckDbConnectExecution;
+
+#[cfg(feature = "duckdb-source")]
+#[derive(Clone)]
+pub(super) struct DuckDbConnectSession {
+    owner: Arc<robin_sparkless_duckdb::DuckDbExecutionOwner>,
+}
+
+impl ConnectService {
+    fn execution_session_handle(
+        &self,
+        session: &robin_sparkless::SparkSession,
+    ) -> Result<EngineSessionHandle, Status> {
+        match self.server.inner.execution_backend {
+            "polars" => Ok(EngineSessionHandle::new("polars", session.clone())),
+            "duckdb" => {
+                #[cfg(feature = "duckdb-source")]
+                {
+                    let owner = self
+                        .server
+                        .inner
+                        .duckdb_execution_owner
+                        .as_ref()
+                        .cloned()
+                        .ok_or_else(|| {
+                            Status::failed_precondition("DuckDB execution owner is unavailable")
+                        })?;
+                    Ok(EngineSessionHandle::new(
+                        "duckdb",
+                        DuckDbConnectSession { owner },
+                    ))
+                }
+                #[cfg(not(feature = "duckdb-source"))]
+                {
+                    let _ = session;
+                    Err(Status::failed_precondition(
+                        "DuckDB execution is not included in this server build",
+                    ))
+                }
+            }
+            _ => Err(Status::failed_precondition(
+                "server execution backend is invalid",
+            )),
+        }
+    }
+}
 
 enum InterruptTarget {
     All,
@@ -733,10 +783,16 @@ impl ConnectResponseSender {
                 return false;
             }
         };
-        let appended = if completes_operation {
-            operation.replay.append_completion(response.clone())
+        let appended = if operation.replay.reattachable {
+            if completes_operation {
+                operation.replay.append_completion(response.clone())
+            } else {
+                operation.replay.append(response.clone())
+            }
         } else {
-            operation.replay.append(response.clone())
+            // Non-reattachable operations only need the live sender reservation below. Keeping
+            // a replay copy here discarded a full protobuf response, including its Arrow bytes.
+            Ok(())
         };
         if let Some(started) = replay_started {
             self.replay_accounting_time += started.elapsed();
@@ -752,6 +808,12 @@ impl ConnectResponseSender {
         let send_started = Instant::now();
         if blocked && let Ok(mut blocked_since) = self.send_blocked_since.lock() {
             *blocked_since = Some(send_started);
+        }
+        if blocked {
+            // Sending can block while the client drains its previous response. Yield the scarce
+            // compute slot during that wait; the producer reacquires it before asking DuckDB or
+            // Polars for the next batch.
+            drop(self.compute_permit.take());
         }
         let result = self.sender.blocking_send(ConnectQueuedResponse {
             response,
@@ -1070,7 +1132,7 @@ impl Drop for ConnectProducerFinished {
 fn start_connect_producer(
     operation: crate::ConnectOperationLease,
     execution: Arc<sparkless_server_runtime::ServerRuntime<crate::SessionLifetime>>,
-    session: robin_sparkless::SparkSession,
+    engine_session: EngineSessionHandle,
     plan: connect_proto::Plan,
     planning_resources: (
         tokio::sync::OwnedMutexGuard<()>,
@@ -1080,6 +1142,7 @@ fn start_connect_producer(
     client_session_id: String,
     server_side_session_id: String,
     operation_id: String,
+    operation_identity: ConnectOperationIdentity,
     reattachable: bool,
     cancellation: robin_sparkless_core::engine::CancellationToken,
     sender: tokio::sync::mpsc::Sender<ConnectQueuedResponse>,
@@ -1209,7 +1272,6 @@ fn start_connect_producer(
             response_rows: 0,
             response_bytes: 0,
         };
-        let session_handle = EngineSessionHandle::new("polars", session);
         let planning_started = sender.trace_enabled.then(Instant::now);
         let translated = normalize::normalize_plan(&plan)
             .map_err(|status| ExecutionError {
@@ -1222,9 +1284,10 @@ fn start_connect_producer(
             .and_then(|plan| {
                 sparkless_server_connect::execute_plan(
                     &execution,
-                    &session_handle,
+                    &engine_session,
                     ConnectExecutionRequest {
                         plan,
+                        operation_identity: operation_identity.clone(),
                         max_batch_rows: MAX_CONNECT_ARROW_BATCH_ROWS,
                         max_response_bytes: MAX_CONNECT_ARROW_RESPONSE_BYTES,
                         cancellation: cancellation.clone(),
@@ -1236,7 +1299,7 @@ fn start_connect_producer(
         }
         drop(session_guard);
         let _session_compute_permit = session_compute_permit;
-        let translated = match translated {
+        let mut translated = match translated {
             Ok(translated) => translated,
             Err(error) => {
                 operation.reject(error.code, &error.message);
@@ -1253,7 +1316,45 @@ fn start_connect_producer(
                 return;
             }
         };
-        let schema = match plan::schema_to_proto(&translated.schema) {
+        let Some(output_schema) = translated.schema else {
+            match translated.batches.next() {
+                Some(Err(error)) => {
+                    let status = connect_execution_failure(error.to_string());
+                    operation.reject("CONNECT_COMMAND_FAILED", status.message());
+                    let _ = sender.send(Err(status), &operation);
+                    return;
+                }
+                Some(Ok(_)) => {
+                    let status =
+                        Status::internal("effect-only Connect command returned Arrow rows");
+                    operation.reject("CONNECT_COMMAND_RESULT_INVALID", status.message());
+                    let _ = sender.send(Err(status), &operation);
+                    return;
+                }
+                None => {}
+            }
+            if reattachable {
+                let response = connect_proto::ExecutePlanResponse {
+                    session_id: client_session_id,
+                    server_side_session_id,
+                    operation_id,
+                    response_id: Uuid::new_v4().to_string(),
+                    metrics: None,
+                    observed_metrics: Vec::new(),
+                    schema: None,
+                    response_type: Some(
+                        connect_proto::execute_plan_response::ResponseType::ResultComplete(
+                            connect_proto::execute_plan_response::ResultComplete {},
+                        ),
+                    ),
+                };
+                let _ = sender.send(Ok(response), &operation);
+            } else if sender.terminal.finish(Ok(())) {
+                operation.complete();
+            }
+            return;
+        };
+        let schema = match plan::schema_to_proto(&output_schema) {
             Ok(schema) => schema,
             Err(status) => {
                 operation.reject("CONNECT_SCHEMA_TRANSLATION_FAILED", status.message());
@@ -1338,7 +1439,7 @@ fn start_connect_producer(
                     connect_proto::execute_plan_response::ResponseType::ArrowBatch(
                         connect_proto::execute_plan_response::ArrowBatch {
                             row_count,
-                            data: batch.bytes,
+                            data: batch.bytes.into(),
                             start_offset: Some(row_offset as i64),
                         },
                     ),
@@ -1447,6 +1548,10 @@ impl ConnectApplication for ConnectService {
             .operation_id
             .clone()
             .unwrap_or_else(|| Uuid::new_v4().to_string());
+        let operation_identity = ConnectOperationIdentity {
+            key: super::connect_operation_key(&identity, &operation_id),
+            request_fingerprint: fingerprint,
+        };
         let deadline = Instant::now() + self.server.inner.config.response_timeout;
         let operation = match self.server.inner.reserve_connect_operation(
             &identity,
@@ -1490,17 +1595,26 @@ impl ConnectApplication for ConnectService {
         };
         let planning_wait = planning_started.elapsed();
         let session = operation._session.0.session.clone();
+        let engine_session = match self.execution_session_handle(&session) {
+            Ok(session) => session,
+            Err(status) => {
+                operation.reject("CONNECT_BACKEND_UNAVAILABLE", status.message());
+                let _ = operation.replay.finish(Err(status.clone()));
+                return Err(status);
+            }
+        };
         let server_side_session_id = operation._session.0.server_side_session_id.clone();
         let (sender, receiver) = tokio::sync::mpsc::channel(1);
         let outcome = start_connect_producer(
             operation,
             Arc::clone(&self.server.inner.execution),
-            session,
+            engine_session,
             plan,
             planning_resources,
             client_session_id,
             server_side_session_id,
             operation_id,
+            operation_identity,
             reattachable,
             cancellation.clone(),
             sender,
@@ -1554,18 +1668,40 @@ impl ConnectApplication for ConnectService {
             .await?;
         let session_id = identity.client_session_id;
         let server_side_session_id = session.0.server_side_session_id.clone();
+        let execution_backend = self.server.inner.execution_backend;
+        let engine_session = self.execution_session_handle(&session.0.session)?;
         let worker_token = analysis_token.clone();
         let mut planning = tokio::task::spawn_blocking(move || {
             let _admission = admission;
             let (_session_guard, _compute_permit, _session_compute_permit) = planning_resources;
-            session.0.session.sync_thread_context();
-            let response = analysis::response(
-                &session_id,
-                &server_side_session_id,
-                &session.0.session,
-                request.analyze,
-                &worker_token,
-            )?;
+            let response = if execution_backend == "duckdb" {
+                #[cfg(feature = "duckdb-source")]
+                {
+                    duckdb::analysis_response(
+                        &session_id,
+                        &server_side_session_id,
+                        &engine_session,
+                        request.analyze,
+                        &worker_token,
+                    )?
+                }
+                #[cfg(not(feature = "duckdb-source"))]
+                {
+                    let _ = (engine_session, request.analyze, worker_token);
+                    return Err(Status::failed_precondition(
+                        "DuckDB execution is not included in this server build",
+                    ));
+                }
+            } else {
+                session.0.session.sync_thread_context();
+                analysis::response(
+                    &session_id,
+                    &server_side_session_id,
+                    &session.0.session,
+                    request.analyze,
+                    &worker_token,
+                )?
+            };
             Ok::<_, Status>(response)
         });
         match tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), &mut planning).await
@@ -2715,7 +2851,7 @@ mod tests {
                     connect_proto::execute_plan_response::ResponseType::ArrowBatch(
                         connect_proto::execute_plan_response::ArrowBatch {
                             row_count: 1,
-                            data: vec![7; 4096],
+                            data: vec![7; 4096].into(),
                             start_offset: Some(0),
                         },
                     ),
@@ -2768,7 +2904,7 @@ mod tests {
                 connect_proto::execute_plan_response::ResponseType::ArrowBatch(
                     connect_proto::execute_plan_response::ArrowBatch {
                         row_count: 0,
-                        data: vec![0; 4096],
+                        data: vec![0; 4096].into(),
                         start_offset: Some(0),
                     },
                 ),
@@ -2786,7 +2922,7 @@ mod tests {
                 connect_proto::execute_plan_response::ResponseType::ArrowBatch(
                     connect_proto::execute_plan_response::ArrowBatch {
                         row_count: 0,
-                        data: vec![0; MAX_CONNECT_REPLAY_OPERATION_BYTES],
+                        data: vec![0; MAX_CONNECT_REPLAY_OPERATION_BYTES].into(),
                         start_offset: Some(0),
                     },
                 ),
@@ -2827,7 +2963,7 @@ mod tests {
                 connect_proto::execute_plan_response::ResponseType::ArrowBatch(
                     connect_proto::execute_plan_response::ArrowBatch {
                         row_count: 0,
-                        data: vec![0; 500_000],
+                        data: vec![0; 500_000].into(),
                         start_offset: Some(0),
                     },
                 ),
@@ -2883,7 +3019,7 @@ mod tests {
                         connect_proto::execute_plan_response::ResponseType::ArrowBatch(
                             connect_proto::execute_plan_response::ArrowBatch {
                                 row_count: 0,
-                                data: vec![0; 900_000],
+                                data: vec![0; 900_000].into(),
                                 start_offset: Some(index * 900_000),
                             },
                         ),

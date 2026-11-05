@@ -307,10 +307,12 @@ IntegerType = imports.IntegerType
 
 The module provides utilities for comparing DataFrames, which is essential for parity testing.
 
-In 4.19.0, `check_schema=True` checks field order, names, and top-level type
-classes. Assert properties such as nullability and nested types separately.
-See the [comparison API contract](TESTING_PYTHON_API.md#comparison-semantics)
-for the full version-specific behavior and dictionary expectations.
+The published 4.19.0 `sparkless-testing` artifact has the schema comparison bug
+tracked in [#1746](https://github.com/eddiethedean/robin-sparkless/issues/1746).
+The unreleased 4.20 source candidate compares nullability, metadata, decimal
+parameters, nested types, and mapping schemas for empty expected results. See
+the [comparison API contract](TESTING_PYTHON_API.md#comparison-semantics) for
+the exact source behavior and version limit.
 
 ### `assert_dataframes_equal`
 

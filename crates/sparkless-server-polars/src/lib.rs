@@ -28,6 +28,7 @@ pub use sparkless_server_core::{
 };
 use sparkless_server_core::{
     EngineSessionHandle, ExecutionError, ExecutionPort, SqlExecutionRequest, SqlExecutionResult,
+    SqlProjectionMetadata,
 };
 use sparkless_server_runtime::ServerRuntime;
 
@@ -161,6 +162,58 @@ impl Server {
                 message: "server limits are invalid or contradictory".into(),
             });
         }
+        let requested_backend =
+            std::env::var("SPARKLESS_EXECUTION_BACKEND").unwrap_or_else(|_| "polars".to_string());
+        let execution_backend = match requested_backend.as_str() {
+            "polars" => {
+                if std::env::var_os("SPARKLESS_DUCKDB_EXECUTION_OWNER").is_some() {
+                    return Err(ServerError {
+                        message: "SPARKLESS_DUCKDB_EXECUTION_OWNER requires SPARKLESS_EXECUTION_BACKEND=duckdb".into(),
+                    });
+                }
+                "polars"
+            }
+            "duckdb" => {
+                if product != ServerProduct::DuckDb {
+                    return Err(ServerError {
+                        message: "DuckDB execution requires the sparkless-server-duckdb product"
+                            .into(),
+                    });
+                }
+                "duckdb"
+            }
+            _ => {
+                return Err(ServerError {
+                    message: "SPARKLESS_EXECUTION_BACKEND must be either 'polars' or 'duckdb'"
+                        .into(),
+                });
+            }
+        };
+        #[cfg(feature = "duckdb-source")]
+        let duckdb_execution_owner = if execution_backend == "duckdb" {
+            let owner_json = std::env::var("SPARKLESS_DUCKDB_EXECUTION_OWNER").map_err(|_| {
+                ServerError {
+                    message: "SPARKLESS_DUCKDB_EXECUTION_OWNER is required when DuckDB execution is selected".into(),
+                }
+            })?;
+            Some(Arc::new(
+                robin_sparkless_duckdb::DuckDbExecutionOwner::from_json(&owner_json).map_err(
+                    |error| ServerError {
+                        message: format!("invalid DuckDB execution owner configuration: {error}"),
+                    },
+                )?,
+            ))
+        } else {
+            None
+        };
+        #[cfg(not(feature = "duckdb-source"))]
+        if execution_backend == "duckdb" {
+            return Err(ServerError {
+                message:
+                    "the sparkless-server-duckdb product was built without DuckDB execution support"
+                        .into(),
+            });
+        }
         #[cfg(feature = "duckdb-source")]
         let external_catalog: Option<Arc<ExternalCatalog>> = if product == ServerProduct::DuckDb {
             match config.duckdb_sources_json.as_deref() {
@@ -246,11 +299,25 @@ impl Server {
             max_accepted,
         );
         #[cfg(feature = "connect")]
-        let execution = execution.with_connect_execution(Arc::new(connect::PolarsConnectExecution));
+        let execution = if execution_backend == "duckdb" {
+            #[cfg(feature = "duckdb-source")]
+            {
+                execution.with_connect_execution(Arc::new(connect::DuckDbConnectExecution))
+            }
+            #[cfg(not(feature = "duckdb-source"))]
+            {
+                execution.with_connect_execution(Arc::new(connect::PolarsConnectExecution))
+            }
+        } else {
+            execution.with_connect_execution(Arc::new(connect::PolarsConnectExecution))
+        };
         let execution = Arc::new(execution);
         let inner = Arc::new(ServerInner {
             config,
             product,
+            execution_backend,
+            #[cfg(feature = "duckdb-source")]
+            duckdb_execution_owner,
             instance_id: Uuid::new_v4().to_string(),
             #[cfg(feature = "http")]
             http_address: Mutex::new(None),
@@ -349,6 +416,11 @@ impl Server {
         F: Future<Output = ()> + Send + 'static,
         R: FnOnce(Option<SocketAddr>, Option<SocketAddr>) -> Result<(), ServerError>,
     {
+        if self.inner.execution_backend == "duckdb" && connect_bind.is_none() {
+            return Err(ServerError {
+                message: "DuckDB execution requires a Spark Connect listener".into(),
+            });
+        }
         if http_bind.is_none() && connect_bind.is_none() {
             return Err(ServerError {
                 message: "at least one HTTP or Spark Connect listener must be enabled".into(),
@@ -514,7 +586,7 @@ impl Server {
             "control_protocol_version": CONTROL_PROTOCOL_VERSION,
             "capabilities_protocol_version": CAPABILITIES_PROTOCOL_VERSION,
             "server_product": self.inner.product.id(),
-            "execution_backend": self.inner.product.execution_backend(),
+            "execution_backend": self.inner.execution_backend,
             "server_version": env!("CARGO_PKG_VERSION"),
             "agent_protocol_version": AGENT_PROTOCOL_VERSION,
             "server_instance_id": self.inner.instance_id,
@@ -1395,10 +1467,38 @@ impl Server {
             transports.push("spark_connect");
         }
         let primary_transport = transports.first().copied().unwrap_or("http");
+        #[cfg(feature = "duckdb-source")]
+        let duckdb_execution_owner_mode =
+            self.inner.duckdb_execution_owner.as_deref().map(|owner| {
+                if owner.is_shared_owner() {
+                    "quack"
+                } else {
+                    "local"
+                }
+            });
+        #[cfg(not(feature = "duckdb-source"))]
+        let duckdb_execution_owner_mode: Option<&str> = None;
+        #[cfg(all(feature = "duckdb-source", feature = "connect"))]
+        let duckdb_connect_limits = if self.inner.execution_backend == "duckdb" {
+            json!({
+                "max_range_rows": 1_000_000,
+                "max_local_input_rows": connect::MAX_CONNECT_LOCAL_ROWS,
+                "max_local_input_ipc_bytes": connect::MAX_CONNECT_LOCAL_IPC_BYTES,
+                "max_local_input_decoded_bytes": connect::MAX_CONNECT_LOCAL_DECODED_BYTES,
+                "max_arrow_batch_rows": robin_sparkless_duckdb::DUCKDB_EXECUTION_MAX_BATCH_ROWS,
+                "max_arrow_batch_bytes": robin_sparkless_duckdb::DUCKDB_EXECUTION_MAX_BATCH_BYTES,
+                "max_durable_operation_receipts": robin_sparkless_duckdb::DUCKDB_EXECUTION_MAX_RECEIPTS
+            })
+        } else {
+            JsonValue::Null
+        };
+        #[cfg(not(all(feature = "duckdb-source", feature = "connect")))]
+        let duckdb_connect_limits = JsonValue::Null;
         json!({
             "capabilities_protocol_version": CAPABILITIES_PROTOCOL_VERSION,
             "server_product": self.inner.product.id(),
-            "execution_backend": self.inner.product.execution_backend(),
+            "execution_backend": self.inner.execution_backend,
+            "duckdb_execution_owner_mode": duckdb_execution_owner_mode,
             "data_sources": self.inner.product.data_sources(),
             "duckdb_owner_modes": self.inner.product.quack_owner_modes(),
             "agent_protocol_version": AGENT_PROTOCOL_VERSION,
@@ -1410,9 +1510,17 @@ impl Server {
             "spark_connect_supported": connect_url.is_some(),
             "spark_connect_url": connect_url,
             "spark_connect_protocol_version": if connect_url.is_some() { Some("4.0.5") } else { None },
-            "sql": {
-                "reads": ["SELECT", "COUNT(*)", "managed_tables"],
-                "mutations": ["CREATE DATABASE", "CREATE TABLE", "INSERT INTO", "DROP TABLE", "DROP DATABASE", "CREATE TEMP VIEW", "DROP VIEW", "USE"]
+            "sql": if self.inner.execution_backend == "duckdb" {
+                json!({
+                    "http_statements": false,
+                    "spark_connect_relations": ["range", "local_scalar", "named_table", "filter", "project", "limit", "inner_equi_join", "count_sum_aggregate", "select_sql"],
+                    "spark_connect_commands": ["create_table", "insert_values"]
+                })
+            } else {
+                json!({
+                    "reads": ["SELECT", "COUNT(*)", "managed_tables"],
+                    "mutations": ["CREATE DATABASE", "CREATE TABLE", "INSERT INTO", "DROP TABLE", "DROP DATABASE", "CREATE TEMP VIEW", "DROP VIEW", "USE"]
+                })
             },
             "limits": {
                 "request_bytes": self.inner.config.max_request_bytes,
@@ -1428,8 +1536,8 @@ impl Server {
                 "catalog_databases": MAX_CATALOG_DATABASES,
                 "catalog_tables": MAX_CATALOG_TABLES,
                 "session_temp_views": MAX_SESSION_TEMP_VIEWS,
-                "table_accounted_bytes": MAX_TABLE_ACCOUNTED_BYTES,
-                "catalog_accounted_bytes": MAX_CATALOG_ACCOUNTED_BYTES,
+                "table_accounted_bytes": if self.inner.execution_backend == "duckdb" { JsonValue::Null } else { json!(MAX_TABLE_ACCOUNTED_BYTES) },
+                "catalog_accounted_bytes": if self.inner.execution_backend == "duckdb" { JsonValue::Null } else { json!(MAX_CATALOG_ACCOUNTED_BYTES) },
                 "retained_mutations": self.inner.config.max_mutation_records,
                 "retained_mutation_bytes": self.inner.config.max_mutation_bytes,
                 "body_read_timeout_ms": self.inner.config.body_read_timeout.as_millis(),
@@ -1437,8 +1545,17 @@ impl Server {
                 "response_timeout_ms": self.inner.config.response_timeout.as_millis()
             },
             "cancellation": "cooperative; native work retains admission until it returns",
-            "catalog_lifetime": "in-memory for this server instance",
-            "catalog_byte_accounting": "visible Arrow buffer address ranges are deduplicated across committed saved tables, materialized session-local view snapshots, staged candidates, and saved/view versions pinned by active statement snapshots; unused buffer capacity and allocator overhead are not measured, some sliced nested buffers can still be counted conservatively, and this is not an RSS limit"
+            "catalog_lifetime": if self.inner.execution_backend == "duckdb" {
+                "DuckDB tables persist in the configured database; Spark Connect sessions remain server-instance scoped"
+            } else {
+                "in-memory for this server instance"
+            },
+            "duckdb_connect_limits": duckdb_connect_limits,
+            "catalog_byte_accounting": if self.inner.execution_backend == "duckdb" {
+                "Polars catalog byte limits do not account for persistent DuckDB tables; see duckdb_connect_limits and the DuckDB execution guide"
+            } else {
+                "visible Arrow buffer address ranges are deduplicated across committed saved tables, materialized session-local view snapshots, staged candidates, and saved/view versions pinned by active statement snapshots; unused buffer capacity and allocator overhead are not measured, some sliced nested buffers can still be counted conservatively, and this is not an RSS limit"
+            }
         })
     }
 
@@ -1449,6 +1566,13 @@ impl Server {
                 StatusCode::SERVICE_UNAVAILABLE,
                 "ServerDraining",
                 "server is draining",
+            );
+        }
+        if self.inner.execution_backend == "duckdb" {
+            return agent_error(
+                "UnsupportedExecutionBackend",
+                "HTTP SQL is disabled for DuckDB execution; submit supported plans through Spark Connect",
+                None,
             );
         }
         if let Err(error) = sparkless_server_http::validate_json_headers(request.headers()) {
@@ -1746,6 +1870,14 @@ impl Server {
             max_result_bytes: self.inner.config.max_result_bytes,
             max_cell_bytes: self.inner.config.max_cell_bytes,
         };
+        let projection = match &class {
+            StatementClass::ReadOnly { projection, .. } => projection.clone(),
+            StatementClass::Mutation { .. } => None,
+        };
+        let statement = match &class {
+            StatementClass::ReadOnly { statement, .. }
+            | StatementClass::Mutation { statement, .. } => statement.clone(),
+        };
         let operation_record_for_job = operation.clone();
         let operation_key_for_job = operation_id.clone();
         let token_for_work = token.clone();
@@ -1755,13 +1887,15 @@ impl Server {
             let _session_guard: OwnedMutexGuard<()> = session_guard;
             let _mutation_guard = mutation_guard;
             let _session_lease = lease;
-            let result = if let StatementClass::Mutation { action, target } = &class_for_job {
+            let result = if let StatementClass::Mutation { action, target, .. } = &class_for_job {
                 execute_through_runtime(
                     &instance.execution,
                     &session,
                     &code,
                     action,
                     target.as_deref(),
+                    &statement,
+                    None,
                     limits,
                     &token_for_work,
                 )
@@ -1777,6 +1911,8 @@ impl Server {
                     &code,
                     "read",
                     None,
+                    &statement,
+                    projection.as_ref(),
                     limits,
                     &token_for_work,
                 )
@@ -1809,6 +1945,7 @@ impl Server {
                 }
             }
             result.map(|(mut response, receipt)| {
+                let mut encoded_json = response.encoded_json.take();
                 if let Some(record) = &operation_record_for_job
                     && let Ok(record) = record.lock()
                 {
@@ -1817,21 +1954,25 @@ impl Server {
                         operation_key_for_job.as_deref().unwrap_or_default(),
                         &record,
                     );
-                    if let Some(object) = response.as_object_mut() {
+                    if let Some(object) = response.payload.as_object_mut() {
                         object.insert("operation".into(), operation);
                         if let Some(receipt) = receipt {
                             object.insert("receipt".into(), receipt);
                         }
+                        encoded_json = None;
                     }
                 }
-                response
+                (response.payload, encoded_json)
             })
         });
         // From this point, the blocking worker owns the reserved operation and will publish its
         // actual outcome even if the HTTP request future is cancelled or times out.
         pending_operation.disarm();
         match timeout(timeout_duration, work).await {
-            Ok(Ok(Ok(response))) => json_response(StatusCode::OK, response),
+            Ok(Ok(Ok((_, Some(encoded_json))))) => {
+                json_response_bytes(StatusCode::OK, encoded_json)
+            }
+            Ok(Ok(Ok((response, None)))) => json_response(StatusCode::OK, response),
             Ok(Ok(Err(error))) => agent_execution_error(
                 &error,
                 operation_id
@@ -2009,6 +2150,11 @@ struct ExecutionFailure {
     error_detail: Option<JsonValue>,
 }
 
+struct ExecutionOutput {
+    payload: JsonValue,
+    encoded_json: Option<Vec<u8>>,
+}
+
 #[derive(Clone, Copy)]
 struct ExecutionLimits {
     max_rows: usize,
@@ -2054,13 +2200,17 @@ fn validate_statement(sql: &str) -> Result<StatementClass, (&'static str, String
         SparkStatement::Sqlparser(statement) => match statement.as_ref() {
             ast::Statement::Query(query) => {
                 validate_query(query)?;
-                StatementClass::ReadOnly
+                StatementClass::ReadOnly {
+                    projection: query_projection_metadata(query),
+                    statement: parsed.clone(),
+                }
             }
             ast::Statement::CreateTable(create) => {
                 validate_create_table(create)?;
                 StatementClass::Mutation {
                     target: Some(validate_object_name(&create.name)?),
                     action: "create_table",
+                    statement: parsed.clone(),
                 }
             }
             ast::Statement::Insert(insert) => {
@@ -2077,6 +2227,7 @@ fn validate_statement(sql: &str) -> Result<StatementClass, (&'static str, String
                 StatementClass::Mutation {
                     target: Some(target),
                     action: "append",
+                    statement: parsed.clone(),
                 }
             }
             ast::Statement::CreateSchema {
@@ -2109,6 +2260,7 @@ fn validate_statement(sql: &str) -> Result<StatementClass, (&'static str, String
                 StatementClass::Mutation {
                     target: Some(validate_single_object_name(schema_name)?),
                     action: "create_database",
+                    statement: parsed.clone(),
                 }
             }
             ast::Statement::CreateDatabase {
@@ -2165,6 +2317,7 @@ fn validate_statement(sql: &str) -> Result<StatementClass, (&'static str, String
                 StatementClass::Mutation {
                     target: Some(validate_single_object_name(db_name)?),
                     action: "create_database",
+                    statement: parsed.clone(),
                 }
             }
             ast::Statement::CreateView(view) => {
@@ -2190,6 +2343,7 @@ fn validate_statement(sql: &str) -> Result<StatementClass, (&'static str, String
                 StatementClass::Mutation {
                     target: Some(validate_single_object_name(&view.name)?),
                     action: "create_view",
+                    statement: parsed.clone(),
                 }
             }
             ast::Statement::Drop {
@@ -2230,6 +2384,7 @@ fn validate_statement(sql: &str) -> Result<StatementClass, (&'static str, String
                 StatementClass::Mutation {
                     target: Some(validate_object_name(&names[0])?),
                     action,
+                    statement: parsed.clone(),
                 }
             }
             ast::Statement::Use(use_statement) => {
@@ -2245,6 +2400,7 @@ fn validate_statement(sql: &str) -> Result<StatementClass, (&'static str, String
                 StatementClass::Mutation {
                     target: Some(target),
                     action: "use",
+                    statement: parsed.clone(),
                 }
             }
             _ => {
@@ -2877,6 +3033,50 @@ fn execute_statement(
     limits: ExecutionLimits,
     token: &CancellationToken,
 ) -> Result<JsonValue, ExecutionFailure> {
+    let statement = robin_sparkless_sql::parse_statement(sql)
+        .map_err(|error| execution_failure("UnsupportedSql", &error.to_string()))?;
+    let projection = match &statement {
+        SparkStatement::Sqlparser(statement) => match statement.as_ref() {
+            ast::Statement::Query(query) => query_projection_metadata(query),
+            _ => None,
+        },
+        _ => None,
+    };
+    execute_statement_with_parsed_statement(
+        session,
+        action,
+        target,
+        &statement,
+        projection.as_ref(),
+        limits,
+        token,
+    )
+}
+
+fn execute_statement_with_parsed_statement(
+    session: &SparkSession,
+    action: &str,
+    target: Option<&str>,
+    statement: &SparkStatement,
+    projection: Option<&SqlProjectionMetadata>,
+    limits: ExecutionLimits,
+    token: &CancellationToken,
+) -> Result<JsonValue, ExecutionFailure> {
+    execute_statement_with_parsed_statement_encoded(
+        session, action, target, statement, projection, limits, token,
+    )
+    .map(|(payload, _)| payload)
+}
+
+fn execute_statement_with_parsed_statement_encoded(
+    session: &SparkSession,
+    action: &str,
+    target: Option<&str>,
+    statement: &SparkStatement,
+    projection: Option<&SqlProjectionMetadata>,
+    limits: ExecutionLimits,
+    token: &CancellationToken,
+) -> Result<(JsonValue, Option<Vec<u8>>), ExecutionFailure> {
     let _catalog_read_lease = if action == "read" {
         session
             .begin_catalog_read_snapshot()
@@ -2890,7 +3090,7 @@ fn execute_statement(
         session
             .set_current_database(use_db)
             .map_err(|error| execution_failure("QueryError", &error.to_string()))?;
-        return Ok(empty_agent_success());
+        return Ok((empty_agent_success(), None));
     }
     if action == "append"
         && target.is_some_and(|name| {
@@ -2916,24 +3116,22 @@ fn execute_statement(
         ));
     }
     let frame = session
-        .sql_with_cancellation(sql, token)
+        .sql_statement_with_cancellation(statement.clone(), token)
         .map_err(map_engine_failure)?;
     if action != "read" {
         // A successful mutation has already crossed its catalog publication point. Its SQL
         // result is empty, so do not run the result collector with the request cancellation
         // token: a deadline racing after publication must not turn a committed effect into a
         // cancelled operation record.
-        return Ok(empty_agent_success());
+        return Ok((empty_agent_success(), None));
     }
     let mut fields = frame
         .schema()
         .map_err(|error| execution_failure("QueryError", &error.to_string()))?
         .logical_fields()
         .to_vec();
-    if let Ok(SparkStatement::Sqlparser(statement)) = robin_sparkless_sql::parse_statement(sql)
-        && let ast::Statement::Query(query) = statement.as_ref()
-    {
-        apply_query_nullability(query, &mut fields);
+    if let Some(projection) = projection {
+        apply_projection_metadata(projection, &mut fields);
     }
     let schema = spark_schema(&fields)?;
     let empty_response = json!({
@@ -2960,16 +3158,15 @@ fn execute_statement(
         "status":"ok",
         "data":{"application/json":{"schema":schema,"data":rows}}
     });
-    let encoded_len = serde_json::to_vec(&response)
-        .map_err(|error| execution_failure("ResultEncodingError", &error.to_string()))?
-        .len();
-    if encoded_len > limits.max_result_bytes {
+    let encoded_json = serde_json::to_vec(&response)
+        .map_err(|error| execution_failure("ResultEncodingError", &error.to_string()))?;
+    if encoded_json.len() > limits.max_result_bytes {
         return Err(execution_failure(
             "ResultLimitExceeded",
             "serialized result exceeds the configured byte limit",
         ));
     }
-    Ok(response)
+    Ok((response, Some(encoded_json)))
 }
 
 struct PolarsSqlExecution;
@@ -2987,11 +3184,22 @@ impl ExecutionPort for PolarsSqlExecution {
                 message: "the session handle is not owned by the Polars execution adapter".into(),
                 details: None,
             })?;
-        execute_statement(
+        let statement = match request.statement {
+            Some(statement) => statement,
+            None => robin_sparkless_sql::parse_statement(&request.sql).map_err(|error| {
+                ExecutionError {
+                    code: "UnsupportedSql",
+                    message: error.to_string(),
+                    details: None,
+                }
+            })?,
+        };
+        execute_statement_with_parsed_statement_encoded(
             session,
-            &request.sql,
             &request.action,
             request.target.as_deref(),
+            &statement,
+            request.projection.as_ref(),
             ExecutionLimits {
                 max_rows: request.max_rows,
                 max_result_bytes: request.max_result_bytes,
@@ -2999,7 +3207,10 @@ impl ExecutionPort for PolarsSqlExecution {
             },
             &request.cancellation,
         )
-        .map(|payload| SqlExecutionResult { payload })
+        .map(|(payload, encoded_json)| SqlExecutionResult {
+            payload,
+            encoded_json,
+        })
         .map_err(|error| ExecutionError {
             code: error.name,
             message: error.message,
@@ -3015,24 +3226,31 @@ fn execute_through_runtime(
     sql: &str,
     action: &str,
     target: Option<&str>,
+    statement: &SparkStatement,
+    projection: Option<&SqlProjectionMetadata>,
     limits: ExecutionLimits,
     cancellation: &CancellationToken,
-) -> Result<JsonValue, ExecutionFailure> {
+) -> Result<ExecutionOutput, ExecutionFailure> {
     let handle = EngineSessionHandle::new("polars", session.clone());
     runtime
         .execute_sql(
             &handle,
             SqlExecutionRequest {
                 sql: sql.to_string(),
+                statement: Some(statement.clone()),
                 action: action.to_string(),
                 target: target.map(str::to_string),
+                projection: projection.cloned(),
                 max_rows: limits.max_rows,
                 max_result_bytes: limits.max_result_bytes,
                 max_cell_bytes: limits.max_cell_bytes,
                 cancellation: cancellation.clone(),
             },
         )
-        .map(|response| response.payload)
+        .map(|response| ExecutionOutput {
+            payload: response.payload,
+            encoded_json: response.encoded_json,
+        })
         .map_err(|error| ExecutionFailure {
             name: error.code,
             message: error.message,
@@ -3040,24 +3258,30 @@ fn execute_through_runtime(
         })
 }
 
-fn apply_query_nullability(query: &ast::Query, fields: &mut [StructField]) {
-    if let Some(names) = query_projection_names(query)
+fn apply_projection_metadata(projection: &SqlProjectionMetadata, fields: &mut [StructField]) {
+    if let Some(names) = projection.names.as_ref()
         && names.len() == fields.len()
     {
         for (field, name) in fields.iter_mut().zip(names) {
             if let Some(name) = name {
-                field.name = name;
+                field.name = name.clone();
             }
         }
     }
-    let Some(nullable) = query_projection_nullability(query) else {
+    let Some(nullable) = projection.nullable.as_ref() else {
         return;
     };
     if nullable.len() == fields.len() {
         for (field, nullable) in fields.iter_mut().zip(nullable) {
-            field.nullable = nullable;
+            field.nullable = *nullable;
         }
     }
+}
+
+fn query_projection_metadata(query: &ast::Query) -> Option<SqlProjectionMetadata> {
+    let names = query_projection_names(query);
+    let nullable = query_projection_nullability(query);
+    (names.is_some() || nullable.is_some()).then_some(SqlProjectionMetadata { names, nullable })
 }
 
 fn query_projection_names(query: &ast::Query) -> Option<Vec<Option<String>>> {
@@ -3592,6 +3816,11 @@ fn agent_error_dynamic(name: &str, message: &str, operation: Option<JsonValue>) 
 #[cfg(feature = "http")]
 fn json_response(status: StatusCode, json: JsonValue) -> HttpResponse {
     let body = serde_json::to_vec(&json).unwrap_or_else(|_| b"{\"status\":\"error\",\"ename\":\"InternalError\",\"evalue\":\"response encoding failed\"}".to_vec());
+    json_response_bytes(status, body)
+}
+
+#[cfg(feature = "http")]
+fn json_response_bytes(status: StatusCode, body: Vec<u8>) -> HttpResponse {
     let mut response = Response::new(Full::new(Bytes::from(body)));
     *response.status_mut() = status;
     response

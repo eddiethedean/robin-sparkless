@@ -8,7 +8,7 @@ search:
 
 # SS-15: Optional DuckDB execution backend for Spark Connect
 
-> **Status: planned; owner unassigned.** Phase: 4, after the supported Connect server and DuckDB data-source phase. Target release: 4.20.0; optional capability.
+> **Status: implementation present in the current 4.20 candidate; not release-ready.** Target release: 4.20.0; optional capability. V37 Spark semantic and schema evidence, V38 transaction/owner lifecycle evidence, performance reports, and exact-artifact release gates remain open.
 > [Index](README.md) · [Roadmap](ROADMAP.md) · [Epic](EPIC.md) · [Decisions](DECISIONS.md) · [Validation](VALIDATION.md)
 
 ## Outcome and distinction from Phase 3
@@ -25,22 +25,45 @@ This is a native single-node backend, not Apache Spark or general Spark compatib
 
 - Phase 2 SS-09/10 Connect translation, analysis, Arrow, replay, session, interruption, and release conformance.
 - Phase 3 SS-14/D14 native DuckDB dependencies, ownership, names, snapshots, types, and measured resource behavior; V35/V36 completed for advertised shared data.
-- Freeze [D15](DECISIONS.md#decisions-required-by-milestones) in 420-01 before implementing the supported DuckDB surface. Short feasibility probes can inform the decision. Record the outcome and evidence for each choice below.
+- The source implementation records the current D15 choices below. D15 is not considered evidence-frozen until the owner, client, reference, transaction, and resource decisions are exercised and their reports are linked. Phase 3 source artifacts remain a separate prerequisite and do not establish execution parity.
+
+## Current implementation status
+
+The candidate source now includes fixed-process backend selection, the DuckDB
+execution owner, Connect request translation and analysis, bounded Arrow
+streaming, typed `CREATE TABLE` and literal `INSERT ... VALUES`, transactional
+operation receipts, launcher identity negotiation, and capability reporting.
+It also includes source changes for 420-07–420-11 and #1746. These are code
+implementation statements, not V37/V38 or performance results. No candidate
+release artifact or public capability claim has been approved.
+
+Implementation details and operator setup are summarized in the
+[DuckDB execution candidate guide](../../DUCKDB_EXECUTION.md). The package and
+server behavior remain documented as 4.19.0 until 4.20 artifacts pass the
+acceptance gates below.
 
 ## D15 decision checklist
 
-The following defaults and query surface are proposals for 420-01. Freeze only the combinations backed by a working probe or a documented validation plan.
+The following table records the choices currently implemented in source.
+They remain candidate choices until the listed probes and validation reports
+pass; source presence alone does not freeze D15.
 
-| Decision | Proposed starting point | Evidence required to freeze |
+| Decision | Current candidate implementation | Evidence required to freeze |
 | --- | --- | --- |
-| Product, backend, and listeners | Keep `sparkless-server` on Polars. Default `sparkless-server-duckdb` to Polars with its existing source behavior. Enable DuckDB execution with trusted startup configuration, fixed for the process. Scope the new query surface to Connect. | Specify configuration names, legal product/backend/listener combinations, and what HTTP statement/status routes do in DuckDB mode. Reject invalid combinations before accepting work. Show consistent product, backend, and capabilities in readiness, `/capabilities` where HTTP is enabled, and launcher checks. |
-| Backend boundary | Reuse the server core's `EngineSessionHandle`, `ExecutionPort`, and `ConnectExecutionPort`, extending them only where the real adapters require it. Keep session identity, admission, and response/replay ownership in shared server code. | Trace session creation and close, Connect AnalyzePlan and ExecutePlan, SQL commands, streaming output, cancellation, and error mapping. Identify the Polars-specific composition and analysis paths still in use. Prove that the default Polars adapter and the DuckDB adapter can both use the same request lifecycle. |
-| Database owner | Start with one configured writable database and one shared owner for the bidirectional fixture. Evaluate the shipped Quack owner path with the matching native DuckDB/Quack versions. Keep 4.19 read-only aliases separate from the execution catalog. | Prove that the selected owner supports bound queries, transactions, streaming results, and interruption through the actual driver. Record connection/session lifetimes, credentials, snapshot scope, supported platforms, and owner loss/restart behavior. Never use separate writable processes opening the same file as a substitute. |
-| Client and semantics | Start from the 4.19 public client and Spark reference, both 4.0.5. Freeze a CPython environment, proto/dependency lock, Spark settings, and the operation/type matrix below. | Capture client request forms and reference schemas/results for representative reads and writes. List enabled session settings, intentional deviations, and rejection status for each unsupported request class. |
-| Mutations and retries | Restrict writes to the frozen allowlist. Retain same-instance outcomes; require a separately proven ledger for cross-restart recovery. | Specify the public operation identity and supported status/retry path, commit witness, when an outcome is known or unknown, how unknown outcomes block unsafe retry, and how persisted tables survive owner/server restart. |
-| Resource budgets | Start with existing Connect admission, response, and replay limits. Set explicit DuckDB connection/thread and query memory policies separately. | Record numeric queue and connection limits, wait/deadline behavior, statement and batch limits, memory/latency guardrails, and the workload and platform for each. Distinguish enforced limits from observed process RSS, and include the owner process in measurements. |
+| Product, backend, and listeners | `sparkless-server` remains Polars-only. `sparkless-server-duckdb` defaults to Polars; `SPARKLESS_EXECUTION_BACKEND=duckdb` requires that product and `SPARKLESS_DUCKDB_EXECUTION_OWNER`. DuckDB mode requires a Spark Connect listener and disables HTTP SQL statements. | Probe default and DuckDB modes through installed launchers. Verify wrong product, missing owner, and missing Connect listener fail before readiness. Compare readiness, capabilities, and launcher identity. |
+| Backend boundary | The shared `ConnectExecutionPort` dispatches to Polars or DuckDB; session/replay/admission remain shared. DuckDB HTTP statements are rejected explicitly. | Trace lifecycle, analysis, command, stream, cancellation, and error paths with both real adapters. Verify no unsupported plan falls back to Polars. |
+| Database owner | Choose either one persistent local database owned by one server process or one shared Quack owner. Quack Connect tables use a fixed execution catalog; 4.19 source aliases remain read-only and independent. | Verify bound queries, transactions, streams, interruption, credentials, snapshot scope, platform support, owner loss/restart, and independent-client visibility against the actual driver/extension. Never use two writable processes on one local file. |
+| Client and semantics | The adapter targets the pinned Spark Connect 4.0.5 protocol. Candidate relations, SQL expressions, result types, and commands are enumerated below; unsupported forms are rejected. | Capture public-client request shapes and Spark 4.0.5 results/schemas for every supported row. Record settings, semantic differences, and boundary rejections. |
+| Mutations and retries | Typed `CREATE TABLE` and literal `INSERT INTO ... VALUES` use a durable receipt table committed in the same transaction. Receipt capacity is 1,000,000; changed content for an existing identity is rejected. | Inject failures around statement/receipt/commit. Verify known and unknown outcomes, retry/reconcile behavior, restart persistence, and identity scope through the supported client/status path. |
+| Resource budgets | One serialized owner connection; DuckDB `threads=1` and `memory_limit=256MB`; range cap 1,000,000; LocalRelation caps 10,000 rows, 1 MiB IPC, and 8 MiB decoded; Arrow output batches cap at 16,384 rows and 1 MiB. Existing Connect admission/response/replay bounds also apply. | Measure queue/deadline behavior, owner and server RSS, throughput, and latency on declared platforms/workloads. Distinguish enforced limits from observed process RSS. |
 
-The 4.19 code reports `polars` from `ServerProduct::execution_backend()` and the Python launcher requires it in both readiness and capabilities. Make backend identity an explicit handshake expectation. Test both products in default mode, the DuckDB product in DuckDB mode, wrong product/backend, and readiness/capabilities disagreement. An unsupported selection or a failed startup probe must fail before exposing an endpoint.
+The 4.19 products default to Polars. The candidate reports the selected runtime
+backend in readiness and capabilities, and the Python launcher negotiates its
+expected value from the child environment. Test both products in default mode,
+the DuckDB product in DuckDB mode, wrong product/backend, missing owner,
+missing Connect listener, and readiness/capabilities disagreement. An
+unsupported selection or failed startup probe must fail before exposing an
+endpoint.
 
 ## Delivery order and dependencies
 
@@ -48,16 +71,20 @@ Start 420-01 with a 4.19 baseline and a minimal path from an unmodified client t
 
 | Slice | Deliverable | Exit evidence |
 | --- | --- | --- |
-| 420-01 | Freeze D15 and compose backend selection | Record the 4.19 baseline. Show installed default Polars startup and a public Connect read in DuckDB mode that produces a backend execution witness and passes launcher negotiation. |
-| 420-02 | Deliver read translation, analysis, and bounded Arrow results | V37 read matrix against the pinned client and reference, including empty results and exact logical schemas. Unsupported requests fail explicitly. |
-| 420-03 | Add enumerated transactional writes and operation outcomes | Fault injection before and after commit distinguishes aborted, committed, and unknown outcomes. Duplicate or conflicting operation identities cannot cause a second effect. |
-| 420-04 | Complete lifecycle and shared database interoperability | V38 bidirectional reads/writes through one owner, cancellation, reattach, release, saturation, and restart evidence. |
-| 420-05 | Integrate and prepare coordinated publication | Complete the candidate checks below against the exact distributions. Repeat the public checks after publication. |
-| 420-06 | Release the `sparkless-testing` schema comparison fix ([#1746](https://github.com/eddiethedean/robin-sparkless/issues/1746)) | Verify the existing source fix on Sparkless and PySpark, including matching and mismatching nested types, nullability, metadata when present, decimal parameters, and empty mapping expectations. Verify the installed helper works without a PySpark dependency; update the testing API docs when the corrected artifact is public. |
+| 420-01 | Backend selection and owner composition implemented | Startup rejects the wrong product/backend/owner combination and readiness/capabilities expose the backend. Public default/selected-mode launcher probes and the frozen D15 evidence record remain pending. |
+| 420-02 | Read translation, analysis, and bounded Arrow streaming implemented | Run V37 against the pinned client and Spark reference, including empty results and exact logical schemas. |
+| 420-03 | Typed DDL/append command subset and durable transaction receipts implemented | Inject faults before and after commit; establish aborted, committed, and unknown outcomes and verify duplicate/conflicting operation identities. |
+| 420-04 | Local and shared owner paths, cancellation, and transactional receipts implemented; restart recovery path unproven | Run V38 bidirectional reads/writes, cancellation, reattach, release, saturation, owner loss, and restart against the same owner. Verify which retries can reach a durable receipt after a server restart; persistence alone is not replay evidence. |
+| 420-05 | Not complete | Finish exact-distribution candidate checks, cross-platform package/image checks, benchmark reports, and the release inventory. Repeat public checks after publication. |
+| 420-06 | Comparator source and documentation updated for [#1746](https://github.com/eddiethedean/robin-sparkless/issues/1746) | Run Sparkless/PySpark regression cases for nested types, nullability, metadata, decimal parameters, and empty mapping expectations. Verify the installed helper has no PySpark runtime dependency and publish the corrected artifact. |
 
 ## Performance follow-ups
 
 These slices improve the existing engine, HTTP, and Connect paths independently of enabling DuckDB execution. The slice IDs identify the work and allow the optimizations to be measured separately.
+
+The source changes for 420-07–420-11 are present in the candidate. None of
+their latency, throughput, RSS, scheduling, or small-job acceptance claims is
+complete until the prescribed reports are retained.
 
 | Slice | Issue | Required outcome and evidence |
 | --- | --- | --- |

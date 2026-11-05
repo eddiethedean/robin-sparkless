@@ -2,8 +2,8 @@
 
 use crate::connect_proto as proto;
 use sparkless_server_core::{
-    ConnectExecutionPlan, ConnectExpression, ConnectGroupType, ConnectJoinType, ConnectLiteral,
-    ConnectNamedTable, ConnectRelation, ConnectRelationKind,
+    ConnectCommand, ConnectExecutionPlan, ConnectExpression, ConnectGroupType, ConnectJoinType,
+    ConnectLiteral, ConnectNamedTable, ConnectRelation, ConnectRelationKind,
 };
 use tonic::Status;
 
@@ -14,7 +14,33 @@ pub(super) fn normalize_plan(plan: &proto::Plan) -> Result<ConnectExecutionPlan,
         Some(proto::plan::OpType::Root(relation)) => {
             ConnectExecutionPlan::Root(normalize_relation(relation, 1)?)
         }
-        Some(proto::plan::OpType::Command(_)) => ConnectExecutionPlan::Command,
+        Some(proto::plan::OpType::Command(command)) => {
+            use proto::command::CommandType;
+            match command.command_type.as_ref() {
+                Some(CommandType::SqlCommand(sql)) => ConnectExecutionPlan::Command(
+                    if sql.args.is_empty()
+                        && sql.pos_args.is_empty()
+                        && sql.named_arguments.is_empty()
+                        && sql.pos_arguments.is_empty()
+                        && sql.input.is_none()
+                    {
+                        ConnectCommand::Sql {
+                            sql: sql.sql.clone(),
+                        }
+                    } else {
+                        ConnectCommand::Unsupported(
+                            "parameterized or relation-backed SQL commands are not enabled".into(),
+                        )
+                    },
+                ),
+                Some(other) => ConnectExecutionPlan::Command(ConnectCommand::Unsupported(format!(
+                    "Connect command {other:?} is not enabled"
+                ))),
+                None => ConnectExecutionPlan::Command(ConnectCommand::Unsupported(
+                    "Connect command type is missing".into(),
+                )),
+            }
+        }
         None => ConnectExecutionPlan::Missing,
     })
 }
@@ -99,6 +125,13 @@ fn normalize_relation(relation: &proto::Relation, depth: usize) -> Result<Connec
             has_pivot: aggregate.pivot.is_some(),
             has_grouping_sets: !aggregate.grouping_sets.is_empty(),
         },
+        Some(proto::relation::RelType::Sql(sql)) => ConnectRelationKind::Sql {
+            query: sql.query.clone(),
+            has_arguments: !sql.args.is_empty()
+                || !sql.pos_args.is_empty()
+                || !sql.named_arguments.is_empty()
+                || !sql.pos_arguments.is_empty(),
+        },
         Some(_) => ConnectRelationKind::Unsupported("relation type".into()),
         None => ConnectRelationKind::Missing,
     };
@@ -127,6 +160,16 @@ fn normalize_expression(expression: &proto::Expression) -> ConnectExpression {
                 Some(proto::expression::literal::LiteralType::Long(value)) => {
                     ConnectLiteral::Long(*value)
                 }
+                Some(proto::expression::literal::LiteralType::Boolean(value)) => {
+                    ConnectLiteral::Boolean(*value)
+                }
+                Some(proto::expression::literal::LiteralType::Double(value)) => {
+                    ConnectLiteral::Double(*value)
+                }
+                Some(proto::expression::literal::LiteralType::String(value)) => {
+                    ConnectLiteral::String(value.clone())
+                }
+                Some(proto::expression::literal::LiteralType::Null(_)) => ConnectLiteral::Null,
                 Some(_) => ConnectLiteral::Unsupported("literal type".into()),
                 None => ConnectLiteral::Missing,
             })
@@ -162,6 +205,7 @@ fn normalize_expression(expression: &proto::Expression) -> ConnectExpression {
             names: alias.name.clone(),
             metadata: alias.metadata.clone(),
         },
+        Some(proto::expression::ExprType::UnresolvedStar(_)) => ConnectExpression::Star,
         Some(_) => ConnectExpression::Unsupported("expression type".into()),
         None => ConnectExpression::Missing,
     }
@@ -195,8 +239,18 @@ pub(super) fn materialize_plan(plan: &ConnectExecutionPlan) -> proto::Plan {
         ConnectExecutionPlan::Root(relation) => proto::Plan {
             op_type: Some(proto::plan::OpType::Root(materialize_relation(relation))),
         },
-        ConnectExecutionPlan::Command => proto::Plan {
-            op_type: Some(proto::plan::OpType::Command(proto::Command::default())),
+        ConnectExecutionPlan::Command(command) => proto::Plan {
+            op_type: Some(proto::plan::OpType::Command(match command {
+                ConnectCommand::Sql { sql } => proto::Command {
+                    command_type: Some(proto::command::CommandType::SqlCommand(
+                        proto::SqlCommand {
+                            sql: sql.clone(),
+                            ..Default::default()
+                        },
+                    )),
+                },
+                ConnectCommand::Unsupported(_) => proto::Command::default(),
+            })),
         },
         ConnectExecutionPlan::Missing => proto::Plan { op_type: None },
     }
@@ -304,6 +358,10 @@ fn materialize_relation(relation: &ConnectRelation) -> proto::Relation {
                 .into_iter()
                 .collect(),
         }))),
+        ConnectRelationKind::Sql { query, .. } => Some(RelType::Sql(proto::Sql {
+            query: query.clone(),
+            ..Default::default()
+        })),
         ConnectRelationKind::Unsupported(_) => Some(RelType::Unknown(proto::Unknown::default())),
         ConnectRelationKind::Missing => None,
     };
@@ -328,9 +386,17 @@ fn materialize_expression(expression: &ConnectExpression) -> proto::Expression {
                 ConnectLiteral::Long(value) => {
                     Some(proto::expression::literal::LiteralType::Long(*value))
                 }
-                ConnectLiteral::Unsupported(_) => Some(
-                    proto::expression::literal::LiteralType::String(String::new()),
+                ConnectLiteral::Boolean(value) => {
+                    Some(proto::expression::literal::LiteralType::Boolean(*value))
+                }
+                ConnectLiteral::Double(value) => {
+                    Some(proto::expression::literal::LiteralType::Double(*value))
+                }
+                ConnectLiteral::String(value) => Some(
+                    proto::expression::literal::LiteralType::String(value.clone()),
                 ),
+                ConnectLiteral::Null => None,
+                ConnectLiteral::Unsupported(_) => None,
                 ConnectLiteral::Missing => None,
             };
             Some(ExprType::Literal(proto::expression::Literal {
@@ -380,9 +446,10 @@ fn materialize_expression(expression: &ConnectExpression) -> proto::Expression {
             name: names.clone(),
             metadata: metadata.clone(),
         }))),
-        ConnectExpression::Unsupported(_) => Some(ExprType::UnresolvedStar(
+        ConnectExpression::Star => Some(ExprType::UnresolvedStar(
             proto::expression::UnresolvedStar::default(),
         )),
+        ConnectExpression::Unsupported(_) => None,
         ConnectExpression::Missing => None,
     };
     proto::Expression {

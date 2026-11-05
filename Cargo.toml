@@ -53,6 +53,7 @@ duckdb-source = ["robin-sparkless-polars/duckdb-source", "dep:robin-sparkless-du
 [dependencies]
 robin-sparkless-core = { version = "4.19.0", path = "crates/robin-sparkless-core" }
 robin-sparkless-plan = { version = "4.19.0", path = "crates/robin-sparkless-plan" }
+robin-sparkless-sql = { version = "4.19.0", path = "crates/robin-sparkless-sql" }
 robin-sparkless-polars = { version = "4.19.0", path = "crates/robin-sparkless-polars" }
 robin-sparkless-duckdb = { version = "4.19.0", path = "crates/robin-sparkless-duckdb", optional = true }
 serde_json = "1.0"

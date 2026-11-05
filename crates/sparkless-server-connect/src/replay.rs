@@ -1034,7 +1034,7 @@ mod tests {
                 connect_proto::execute_plan_response::ResponseType::ArrowBatch(
                     connect_proto::execute_plan_response::ArrowBatch {
                         row_count: 1,
-                        data: vec![0; bytes],
+                        data: vec![0; bytes].into(),
                         start_offset: Some(0),
                     },
                 ),

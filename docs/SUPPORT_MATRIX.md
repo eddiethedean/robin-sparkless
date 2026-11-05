@@ -30,6 +30,13 @@ version used in production, including nulls, empty inputs, invalid data, and typ
 
 Evidence and narrower contracts:
 
+- The optional DuckDB **execution** adapter is present in the unreleased 4.20
+  source candidate and is not included in the 4.19.0 support matrix above.
+  Its frozen implementation subset and startup config are in the
+  [candidate guide](DUCKDB_EXECUTION.md); Spark 4.0.5 semantic validation
+  (V37), owner/write lifecycle validation (V38), and exact-artifact release
+  checks remain open.
+
 - The 4.19 DuckDB source is packaged by `sparkless-server-duckdb` and enabled by
   trusted `SPARKLESS_DUCKDB_SOURCES` configuration. The `duckdb-source` feature
   belongs to the Polars adapter crate and is not exposed by the base product.

@@ -24,11 +24,17 @@ mod catalog;
 mod config;
 mod connection;
 mod connection_pool;
+mod execution;
 mod scan;
 mod snapshot;
 
 pub use catalog::DuckDbCatalog;
 pub use config::{DuckDbQuackSourceConfig, DuckDbSourceConfig, DuckDbSourceSpec};
+pub use execution::{
+    DUCKDB_EXECUTION_MAX_BATCH_BYTES, DUCKDB_EXECUTION_MAX_BATCH_ROWS,
+    DUCKDB_EXECUTION_MAX_RECEIPTS, DuckDbExecutionOwner, DuckDbExecutionOwnerConfig,
+    DuckDbTransactionOutcome,
+};
 
 #[cfg(test)]
 mod source_pool_tests {

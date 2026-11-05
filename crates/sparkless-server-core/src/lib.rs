@@ -4,10 +4,11 @@ pub mod config;
 pub mod execution;
 pub use config::ServerConfig;
 pub use execution::{
-    ConnectExecutionPlan, ConnectExecutionPort, ConnectExecutionRequest, ConnectExecutionResult,
-    ConnectExpression, ConnectGroupType, ConnectJoinType, ConnectLiteral, ConnectNamedTable,
-    ConnectRelation, ConnectRelationKind, EngineSessionHandle, ExecutionError, ExecutionPort,
-    SqlExecutionRequest, SqlExecutionResult,
+    ConnectCommand, ConnectExecutionPlan, ConnectExecutionPort, ConnectExecutionRequest,
+    ConnectExecutionResult, ConnectExpression, ConnectGroupType, ConnectJoinType, ConnectLiteral,
+    ConnectNamedTable, ConnectOperationIdentity, ConnectRelation, ConnectRelationKind,
+    EngineSessionHandle, ExecutionError, ExecutionPort, SqlExecutionRequest, SqlExecutionResult,
+    SqlProjectionMetadata,
 };
 
 pub const CONTROL_PROTOCOL_VERSION: u32 = 2;
@@ -21,7 +22,7 @@ pub const MAX_CONTROL_FRAME_BYTES: usize = 16 * 1024;
 pub enum ServerProduct {
     /// Default Sparkless server with the Polars execution backend.
     Base,
-    /// Polars execution with optional read-only DuckDB table sources.
+    /// Optional DuckDB server product; backend selection is a startup setting.
     DuckDb,
 }
 

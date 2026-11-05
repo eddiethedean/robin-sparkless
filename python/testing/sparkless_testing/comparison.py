@@ -94,11 +94,6 @@ def compare_dataframes(
         errors.append(
             f"Row count mismatch: got {len(actual_data)}, expected {len(expected_data)}"
         )
-        return ComparisonResult(
-            equivalent=False,
-            errors=errors,
-            row_count_match=False,
-        )
 
     # Compare schemas if requested
     schema_match = True
@@ -113,20 +108,21 @@ def compare_dataframes(
         if isinstance(expected, dict):
             # The schema remains useful for empty expected results.
             expected_columns = _schema_column_names(expected_schema)
-            if expected_columns is None:
+            if expected_columns is None and expected_data:
                 first_dict = next(
                     (r for r in expected_data if isinstance(r, dict)),
                     None,
                 )
-                expected_columns = list(first_dict.keys()) if first_dict else []
+                expected_columns = list(first_dict.keys()) if first_dict else None
         else:
             expected_columns = expected.columns
 
-        column_match = set(actual_columns) == set(expected_columns)
-        if not column_match:
-            errors.append(
-                f"Column mismatch: got {set(actual_columns)}, expected {set(expected_columns)}"
-            )
+        if expected_columns is not None:
+            column_match = list(actual_columns) == list(expected_columns)
+            if not column_match:
+                errors.append(
+                    f"Column mismatch: got {list(actual_columns)}, expected {list(expected_columns)}"
+                )
     except Exception:
         column_match = True  # Skip column check if it fails
 

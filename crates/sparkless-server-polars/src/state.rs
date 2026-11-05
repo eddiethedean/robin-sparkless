@@ -9,6 +9,9 @@ pub(super) use sparkless_server_runtime::{AdmissionTicket, OperationRecord, Rese
 pub(super) struct ServerInner {
     pub(super) config: ServerConfig,
     pub(super) product: ServerProduct,
+    pub(super) execution_backend: &'static str,
+    #[cfg(feature = "duckdb-source")]
+    pub(super) duckdb_execution_owner: Option<Arc<robin_sparkless_duckdb::DuckDbExecutionOwner>>,
     pub(super) instance_id: String,
     #[cfg(feature = "http")]
     pub(super) http_address: Mutex<Option<SocketAddr>>,
@@ -141,7 +144,11 @@ impl ConnectOperationLease {
             && record.effect_outcome == "pending"
         {
             record.execution_state = "failed";
-            record.effect_outcome = "rejected";
+            record.effect_outcome = if code.contains("OUTCOME_UNKNOWN") {
+                "unknown"
+            } else {
+                "rejected"
+            };
             record.error = Some((code.to_string(), bound_text(message, MAX_ERROR_BYTES)));
         }
     }
@@ -194,12 +201,16 @@ pub(super) struct OperationStatusRequest {
 }
 
 #[cfg(feature = "http")]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub(super) enum StatementClass {
-    ReadOnly,
+    ReadOnly {
+        projection: Option<SqlProjectionMetadata>,
+        statement: SparkStatement,
+    },
     Mutation {
         target: Option<String>,
         action: &'static str,
+        statement: SparkStatement,
     },
 }
 

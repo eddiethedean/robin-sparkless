@@ -448,6 +448,19 @@ impl SparkSession {
         self.sql_with_context(query, &context)
     }
 
+    /// Execute a parsed SQL statement accepted by a trusted caller without reparsing its source
+    /// text. The caller must validate the statement against the public operation contract.
+    #[cfg(feature = "sql")]
+    pub fn sql_statement_with_cancellation(
+        &self,
+        statement: robin_sparkless_sql::SparkStatement,
+        token: &robin_sparkless_core::CancellationToken,
+    ) -> Result<DataFrame, EngineError> {
+        self.0
+            .sql_statement_with_cancellation(statement, token)
+            .map(DataFrame)
+    }
+
     pub fn execution_context(
         &self,
         operation_id: impl Into<Arc<str>>,

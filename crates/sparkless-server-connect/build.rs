@@ -22,6 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build_server(true)
         .build_client(false)
         .codec_path("crate::BoundedProstCodec")
+        .bytes(".spark.connect.ExecutePlanResponse.ArrowBatch.data")
         .file_descriptor_set_path(
             std::path::PathBuf::from(std::env::var("OUT_DIR")?)
                 .join("spark_connect_descriptor.bin"),

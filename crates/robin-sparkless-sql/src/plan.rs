@@ -175,6 +175,9 @@ pub enum ExpressionShape {
     Function {
         name: String,
         arguments: Vec<SqlExpression>,
+        distinct: bool,
+        has_star_argument: bool,
+        has_unsupported_modifiers: bool,
     },
     Unary {
         operator: String,
@@ -463,26 +466,50 @@ fn lower_expression(expr: &Expr) -> SqlExpression {
         ),
         Expr::Value(_) => ExpressionShape::Literal,
         Expr::Function(function) => {
+            let mut distinct = false;
+            let mut has_star_argument = false;
+            let mut has_unsupported_modifiers = function.uses_odbc_syntax
+                || !matches!(function.parameters, FunctionArguments::None)
+                || function.filter.is_some()
+                || function.null_treatment.is_some()
+                || function.over.is_some()
+                || !function.within_group.is_empty();
             let arguments = match &function.args {
-                FunctionArguments::List(list) => list
-                    .args
-                    .iter()
-                    .filter_map(|argument| match argument {
-                        FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => {
-                            Some(lower_expression(expr))
-                        }
-                        FunctionArg::Named {
-                            arg: FunctionArgExpr::Expr(expr),
-                            ..
-                        } => Some(lower_expression(expr)),
-                        _ => None,
-                    })
-                    .collect(),
+                FunctionArguments::List(list) => {
+                    distinct = list.duplicate_treatment.is_some();
+                    has_unsupported_modifiers |= !list.clauses.is_empty();
+                    list.args
+                        .iter()
+                        .filter_map(|argument| match argument {
+                            FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => {
+                                Some(lower_expression(expr))
+                            }
+                            FunctionArg::Unnamed(FunctionArgExpr::Wildcard) => {
+                                has_star_argument = true;
+                                None
+                            }
+                            FunctionArg::Named {
+                                arg: FunctionArgExpr::Expr(expr),
+                                ..
+                            } => {
+                                has_unsupported_modifiers = true;
+                                Some(lower_expression(expr))
+                            }
+                            _ => {
+                                has_unsupported_modifiers = true;
+                                None
+                            }
+                        })
+                        .collect()
+                }
                 FunctionArguments::None | FunctionArguments::Subquery(_) => Vec::new(),
             };
             ExpressionShape::Function {
                 name: crate::object_name(&function.name),
                 arguments,
+                distinct,
+                has_star_argument,
+                has_unsupported_modifiers,
             }
         }
         Expr::UnaryOp { op, expr } => ExpressionShape::Unary {

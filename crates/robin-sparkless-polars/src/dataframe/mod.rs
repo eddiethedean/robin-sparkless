@@ -3180,29 +3180,48 @@ impl DataFrame {
             .map(|(name, _)| name.clone())
             .collect();
         let schema = StructType::from_polars_schema(&plan_schema);
-        let mut rows = Vec::with_capacity(collected.height());
-        let mut encoded_data_bytes = 2usize; // The empty outer JSON array: [].
-        for row_index in 0..collected.height() {
-            token.check_cancelled()?;
-            let mut row = Vec::with_capacity(names_and_dtypes.len());
-            let mut encoded_row_bytes = 2usize; // Opening and closing brackets.
-            let mut column_occurrences = HashMap::<String, usize>::new();
-            for (column_index, (name, dtype)) in names_and_dtypes.iter().enumerate() {
-                let occurrence = column_occurrences.entry(name.clone()).or_default();
-                let physical_index = collected
-                    .columns()
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, column)| column.name().as_str() == name)
-                    .nth(*occurrence)
-                    .map(|(index, _)| index)
+        // Resolve duplicate labels once. Filtering every physical column for every cell turns
+        // wide result collection into repeated O(columns) scans; column identity is positional
+        // and remains stable for the collected frame.
+        let mut physical_positions = HashMap::<&str, Vec<usize>>::new();
+        for (physical_index, column) in collected.columns().iter().enumerate() {
+            physical_positions
+                .entry(column.name().as_str())
+                .or_default()
+                .push(physical_index);
+        }
+        let mut seen_names = HashMap::<&str, usize>::new();
+        let column_plan = names_and_dtypes
+            .iter()
+            .enumerate()
+            .map(|(column_index, (name, dtype))| {
+                let occurrence = seen_names.entry(name.as_str()).or_default();
+                let physical_index = physical_positions
+                    .get(name.as_str())
+                    .and_then(|positions| positions.get(*occurrence))
+                    .copied()
                     .ok_or_else(|| {
                         EngineError::invalid_input(format!(
                             "result column at position {column_index} ('{name}') is missing"
                         ))
                     })?;
                 *occurrence += 1;
-                let column = &collected.columns()[physical_index];
+                let path = serde_json::to_string(name).map_err(|error| {
+                    EngineError::invalid_input(format!(
+                        "could not encode result column name: {error}"
+                    ))
+                })?;
+                Ok((physical_index, dtype, path))
+            })
+            .collect::<Result<Vec<_>, EngineError>>()?;
+        let mut rows = Vec::with_capacity(collected.height());
+        let mut encoded_data_bytes = 2usize; // The empty outer JSON array: [].
+        for row_index in 0..collected.height() {
+            token.check_cancelled()?;
+            let mut row = Vec::with_capacity(names_and_dtypes.len());
+            let mut encoded_row_bytes = 2usize; // Opening and closing brackets.
+            for (physical_index, dtype, path) in &column_plan {
+                let column = &collected.columns()[*physical_index];
                 let value = column.get(row_index).map_err(polars_to_core_error)?;
                 let json = if matches!(value, AnyValue::Null) {
                     JsonValue::Null
@@ -3211,11 +3230,7 @@ impl DataFrame {
                         &value,
                         dtype,
                         array_struct_paths,
-                        &serde_json::to_string(name).map_err(|error| {
-                            EngineError::invalid_input(format!(
-                                "could not encode result column name: {error}"
-                            ))
-                        })?,
+                        path,
                         true,
                     )
                     .map_err(polars_to_core_error)?

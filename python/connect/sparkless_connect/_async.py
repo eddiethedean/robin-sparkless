@@ -186,6 +186,10 @@ class AsyncSparklessServer:
                 record,
                 require_spark_connect=self.connect_port is not None,
                 expected_product=self.product,
+                expected_backend=(self.env or {}).get(
+                    "SPARKLESS_EXECUTION_BACKEND",
+                    os.environ.get("SPARKLESS_EXECUTION_BACKEND", "polars"),
+                ),
             )
         except BaseException as error:
             failed_start_cleanup = asyncio.create_task(self._cleanup_failed_start())

@@ -106,3 +106,7 @@ local client and send cancellation to the Quack owner. See the
 [deployment runbook](PRODUCTION.md) for the listener trust boundary and the
 [development evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md) for the
 standalone, shared-owner, and Spark differential checks.
+
+This page describes the 4.19 read-only source mode. The unreleased 4.20
+candidate's separate writable execution owner and Connect-only query backend
+are described in [DuckDB Connect execution](DUCKDB_EXECUTION.md).

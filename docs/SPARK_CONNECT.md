@@ -114,6 +114,16 @@ across the server, even when more workers connect. See the
 | Results | Spark logical descriptors and bounded, independently decodable Arrow IPC batches |
 | Lifecycle | Execute, reattach, prefix/all release, session release, interrupt, enriched error lookup, and stale identity rejection |
 
+## Unreleased 4.20 DuckDB execution candidate
+
+The published 4.19.0 products still execute through Polars, including when they
+read configured DuckDB source tables. A separate source implementation for
+4.20 adds an opt-in DuckDB Connect execution backend, typed table creation, and
+`INSERT ... VALUES`. Its supported surface, startup settings, owner modes, and
+open Spark/interoperability gates are documented in the
+[DuckDB execution candidate guide](DUCKDB_EXECUTION.md). Do not use that page as
+the 4.19.0 support contract.
+
 Use public column names or column references bound to their input DataFrames.
 Bound references retain their input through aliases and joins. Joins on shared
 column names return one column per key, in the requested key order.

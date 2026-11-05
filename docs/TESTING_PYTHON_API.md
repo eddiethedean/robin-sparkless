@@ -10,7 +10,7 @@ Use `pytest_plugins = ["sparkless_testing.plugin"]` in the suite's root
 | `get_mode()` | Reads `SPARKLESS_TEST_MODE` | `Mode.SPARKLESS` by default or `Mode.PYSPARK` |
 | `create_session(app_name="test", mode=None, enable_delta=False, enable_hive=False, **config)` | Uses the current mode if omitted. Delta and Hive switches apply to PySpark. | A session for the selected backend. Missing engine dependencies or startup errors fail session creation. See [session lifecycle](#session-lifecycle). |
 | `get_imports(mode=None)` | Optional backend selector | `SparkImports` with backend-specific functions, session class, rows, windows, and types |
-| `compare_dataframes(actual, expected, *, tolerance=1e-6, check_schema=True, check_order=False)` | Actual DataFrame and an expected DataFrame or dictionary with `data` and optional `schema` | `ComparisonResult` with `equivalent` and `errors`. See [comparison semantics](#comparison-semantics) for schema limits. |
+| `compare_dataframes(actual, expected, *, tolerance=1e-6, check_schema=True, check_order=False)` | Actual DataFrame and an expected DataFrame or dictionary with `data` and optional `schema` | `ComparisonResult` with row, ordered column, schema, and value results. |
 | `assert_dataframes_equal(actual, expected, **options)` | Same comparison options | Returns `None` on equality and raises `AssertionError` on differences |
 | `assert_rows_equal(actual, expected, *, order_matters=True, tolerance=1e-6)` | Lists of collected rows | Returns `None` on equality and raises `AssertionError` on differences |
 
@@ -29,15 +29,22 @@ For Spark Connect session ownership, see the [server launcher API](SERVER_PYTHON
 ## Comparison semantics
 
 `assert_dataframes_equal` and `compare_dataframes` collect the input DataFrames.
-In the published `sparkless-testing==4.19.0`, `check_schema=True` compares field
-order, field names, and top-level type classes when both schemas are available.
-It can miss differences in nullability, metadata, decimal precision and scale,
-and nested types. Assert those properties separately if they matter to your test.
+The comparison source checks field order and names, data types, nullability,
+metadata when both schemas declare it, decimal precision and scale, nested
+struct fields, and array/map element nullability. A mismatch contributes to
+`schema_match=False` and `equivalent=False`, including when the row counts also
+differ. Set `check_schema=False` to compare values and ordered column names
+without requiring schema equality.
 
-Use an expected DataFrame for schema comparisons in 4.19.0. For value-only
-comparisons, you can pass a dictionary with a `data` list of row dictionaries.
-The expanded schema checks, including dictionary-form schemas, are unreleased
-and tracked in [#1746](https://github.com/eddiethedean/robin-sparkless/issues/1746).
+An expected mapping may include `data` and `schema`. Schema field names supply
+the expected columns even when `data=[]`; this is useful for checking an empty
+result. A mapping that omits schema information cannot assert those omitted
+schema properties. The implementation addresses [#1746](https://github.com/eddiethedean/robin-sparkless/issues/1746).
+
+The published `sparkless-testing==4.19.0` artifact still contains the reported
+bug. The corrected source is part of the unreleased 4.20 candidate; use it from
+the repository or wait for the corrected package version before relying on
+these comparisons for schema parity.
 
 ```python
 from sparkless_testing import assert_dataframes_equal, assert_rows_equal

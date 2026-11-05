@@ -3722,6 +3722,18 @@ impl SparkSession {
         crate::sql::execute_sql_with_cancellation(self, query, token)
     }
 
+    /// Execute a statement parsed and validated by a trusted caller without parsing its SQL text
+    /// again. The caller remains responsible for validating the statement against its public
+    /// operation contract before invoking this method.
+    #[cfg(feature = "sql")]
+    pub fn sql_statement_with_cancellation(
+        &self,
+        statement: spark_sql_parser::SparkStatement,
+        token: &robin_sparkless_core::CancellationToken,
+    ) -> Result<DataFrame, EngineError> {
+        crate::sql::execute_parsed_statement_with_cancellation(self, statement, token)
+    }
+
     /// Execute a SQL query (stub when `sql` feature is disabled).
     #[cfg(not(feature = "sql"))]
     pub fn sql(&self, _query: &str) -> Result<DataFrame, PolarsError> {

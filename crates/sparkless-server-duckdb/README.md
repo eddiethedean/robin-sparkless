@@ -1,11 +1,15 @@
 # sparkless-server-duckdb
 
-Native HTTP and Spark Connect server with trusted, read-only DuckDB table sources.
+Native HTTP and Spark Connect server with trusted DuckDB table sources. In the
+published 4.19.0 release, Polars remains the execution backend and DuckDB
+provides configured read-only table sources. The unreleased 4.20 candidate adds
+an optional DuckDB Connect execution backend selected with
+`SPARKLESS_EXECUTION_BACKEND=duckdb`.
 
-The server uses Polars for DataFrame execution. DuckDB supplies configured table batches through
-the native Arrow source interface. Standalone sources are opened read-only. Shared Quack sources
-must point to an explicitly configured DuckDB owner. The base `sparkless-server` product excludes
-the DuckDB dependency and Quack extension.
+For the candidate backend, configure `SPARKLESS_DUCKDB_EXECUTION_OWNER` with a
+persistent local database or a shared Quack owner. This execution owner is
+separate from the `SPARKLESS_DUCKDB_SOURCES` read-only source aliases. The base
+`sparkless-server` product continues to exclude DuckDB and Quack.
 
 Build the Connect-enabled product from the workspace root:
 
@@ -15,6 +19,10 @@ cargo build --release -p sparkless-server-duckdb --no-default-features --feature
 
 Configure a trusted source in the deployment environment with `SPARKLESS_DUCKDB_SOURCES`. Clients
 send table names and cannot select database paths, credentials, or extension binaries.
+
+See the [4.20 DuckDB execution candidate guide](../../docs/DUCKDB_EXECUTION.md)
+for backend selection, transaction receipts, supported Connect plans, and
+release validation status.
 
 For the Python Spark Connect client, install the same published version with
 `pip install "sparkless-server-duckdb[connect]==4.19.0"`. See the

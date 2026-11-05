@@ -36,6 +36,8 @@ port. Query `/capabilities` after launch for the effective limits.
 | `SPARKLESS_SERVER_HOST` | 127.0.0.1 |
 | `SPARKLESS_SERVER_PORT` | 8099 |
 | `SPARKLESS_DUCKDB_SOURCES` | Unset. Configure read-only source aliases on the [4.19 DuckDB server](DUCKDB_SOURCE.md). |
+| `SPARKLESS_EXECUTION_BACKEND` | `polars`. Set to `duckdb` on `sparkless-server-duckdb` to select the 4.20 candidate Connect backend. |
+| `SPARKLESS_DUCKDB_EXECUTION_OWNER` | Unset. Required JSON owner config when `SPARKLESS_EXECUTION_BACKEND=duckdb`; see [DuckDB execution](DUCKDB_EXECUTION.md). |
 | `SPARKLESS_MAX_REQUEST_BYTES` | 1,048,576 |
 | `SPARKLESS_MAX_SQL_BYTES` | 262,144 |
 | `SPARKLESS_MAX_RESULT_ROWS` | 10,000 |
@@ -55,4 +57,11 @@ Contradictory byte budgets fail startup. The reserved `sql-warehouse` session is
 exempt from idle expiry. These bounds do not cap query intermediate memory/CPU;
 Connect also has independent replay/live-stream limits listed in its guide.
 Source authority: [shared server configuration](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/sparkless-server-core/src/config.rs).
+
+`SPARKLESS_DUCKDB_EXECUTION_OWNER` accepts a trusted startup JSON object with
+`mode: "local"` and `database_path`, or `mode: "quack"` with `quack_uri`,
+`token`, and optional TLS/extension fields. The local file must have one
+Sparkless writer process. Use Quack for a shared writable owner. These settings
+configure the unreleased 4.20 execution candidate; the published 4.19 server
+continues to use Polars for execution.
 Operate within a trusted boundary using [the runbook](PRODUCTION.md).

@@ -157,6 +157,10 @@ class SparklessServer:
                 record,
                 require_spark_connect=self.connect_port is not None,
                 expected_product=self.product,
+                expected_backend=(self.env or {}).get(
+                    "SPARKLESS_EXECUTION_BACKEND",
+                    os.environ.get("SPARKLESS_EXECUTION_BACKEND", "polars"),
+                ),
             )
         except BaseException as error:
             if self.connect_port is not None and self._process is not None:

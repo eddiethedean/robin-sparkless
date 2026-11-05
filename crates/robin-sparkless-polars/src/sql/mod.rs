@@ -189,8 +189,17 @@ pub fn execute_sql_with_cancellation(
 ) -> Result<DataFrame, EngineError> {
     #[cfg(feature = "test-hooks")]
     test_hooks::arm_for_query(query);
-    token.check_cancelled()?;
     let statement = parse_spark_statement(query).map_err(polars_to_core_error)?;
+    execute_parsed_statement_with_cancellation(session, statement, token)
+}
+
+/// Execute a statement that has already passed parsing and request validation.
+pub fn execute_parsed_statement_with_cancellation(
+    session: &SparkSession,
+    statement: SparkStatement,
+    token: &CancellationToken,
+) -> Result<DataFrame, EngineError> {
+    token.check_cancelled()?;
     let statement_plan = robin_sparkless_sql::lower_statement(&statement)
         .map_err(|error| EngineError::invalid_input(error.to_string()))?;
     let read_only = statement_plan.effect() == robin_sparkless_sql::StatementEffect::ReadOnly;

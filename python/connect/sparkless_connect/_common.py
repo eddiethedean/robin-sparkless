@@ -162,6 +162,7 @@ def _validate_ready(
     record: Dict[str, Any],
     require_spark_connect: bool = True,
     expected_product: str = "base",
+    expected_backend: str = "polars",
 ) -> Tuple[str, Optional[str]]:
     if record.get("type") != "ready":
         raise SparklessServerError("server did not emit a readiness record")
@@ -190,8 +191,14 @@ def _validate_ready(
                 expected_product, reported_product or "legacy/unknown"
             )
         )
-    if record.get("execution_backend") != "polars":
-        raise SparklessServerError("server execution backend is not Polars")
+    if expected_backend not in {"polars", "duckdb"}:
+        raise SparklessServerError("selected execution backend must be 'polars' or 'duckdb'")
+    if record.get("execution_backend") != expected_backend:
+        raise SparklessServerError(
+            "server execution backend is {}, expected {}".format(
+                record.get("execution_backend") or "unknown", expected_backend
+            )
+        )
     if (
         expected_server_version is not None
         and server_version != expected_server_version
@@ -223,9 +230,9 @@ def _validate_ready(
         raise SparklessServerError(
             "server product differs between readiness and capabilities"
         )
-    if capabilities.get("execution_backend") != "polars":
+    if capabilities.get("execution_backend") != expected_backend:
         raise SparklessServerError(
-            "server capabilities do not identify Polars execution"
+            "server capabilities do not identify the selected execution backend"
         )
     sources = capabilities.get("data_sources")
     if not isinstance(sources, list) or any(
