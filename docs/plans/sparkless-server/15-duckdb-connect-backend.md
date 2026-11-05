@@ -37,6 +37,7 @@ This is a native single-node backend, not Apache Spark or general Spark compatib
 | 420-03 | Add enumerated transactional writes and truthful operation outcomes | Atomic effects/receipts, duplicate/conflict/deadline/disconnect/restart evidence; unsupported writes fail before effects |
 | 420-04 | Complete Connect lifecycle and shared-database interoperability | Cancellation/reattach/release/saturation plus independent DuckDB client read/write visibility through one owner |
 | 420-05 | Complete V37/V38, backend documentation, benchmarks, and distribution | Numeric budgets and capability matrix; default regressions; fresh enabled/disabled installs |
+| 420-06 | Fix `sparkless-testing` schema comparison correctness ([#1746](https://github.com/eddiethedean/robin-sparkless/issues/1746)) | Compare field order/name, nullability, metadata, decimal parameters, and nested struct/array/map types; preserve declared columns for empty mapping expectations; verify matching and mismatching cases across Sparkless and PySpark |
 
 ## SQL, plans, and type compatibility
 

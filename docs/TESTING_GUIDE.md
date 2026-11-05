@@ -18,10 +18,19 @@ For 4.18, follow the [guide at the published tag](https://github.com/eddiethedea
 python -m pip install "sparkless[testing]==4.19.0"
 ```
 
-For the PySpark run, use a separate environment and install
-`sparkless[testing,pyspark]==4.19.0` with a
-compatible Java runtime. This selects PySpark 3.5. Use `testing,pyspark4`
-for PySpark 4 with Java 17 and set `SPARKLESS_PYSPARK_COMPAT=4.0`. See [installation and extras](python_getting_started.md#optional-extras).
+For the PySpark comparison, use a separate environment and pin the same oracle
+version used in the project's docs checks. PySpark 3.5 uses Java 11 or newer.
+PySpark 4.0.5 uses Java 17 and the `4.0` compatibility profile. These commands
+pin the actual runtime instead of relying on the extra's supported version
+range. See [installation and extras](python_getting_started.md#optional-extras).
+
+```bash
+# Separate environment for PySpark 3.5.8
+python -m pip install "sparkless[testing]==4.19.0" "pyspark==3.5.8"
+
+# Separate environment for PySpark 4.0.5
+python -m pip install "sparkless[testing]==4.19.0" "pyspark==4.0.5"
+```
 
 ### 1. Add the pytest plugin to your `conftest.py`
 
@@ -53,9 +62,15 @@ def test_filter(spark):
 # In the directory containing conftest.py and test_example.py
 SPARKLESS_TEST_MODE=sparkless python -m pytest test_example.py
 
-# In the separate PySpark environment
-SPARKLESS_TEST_MODE=pyspark python -m pytest test_example.py
+# In the separate PySpark 3.5.8 environment
+SPARKLESS_TEST_MODE=pyspark SPARKLESS_PYSPARK_COMPAT=3.5 python -m pytest test_example.py
 ```
+
+For PySpark 4.0.5, set `SPARKLESS_PYSPARK_COMPAT=4.0` on the last command.
+The selector chooses a backend. The compatibility profile does not install an
+oracle or certify every Spark behavior. Check `python -m pip show pyspark` and
+run the [backend identity example](https://github.com/eddiethedean/robin-sparkless/blob/main/examples/python/test_dual_mode_example.py)
+before using a suite as parity evidence.
 
 ---
 
@@ -280,6 +295,14 @@ IntegerType = imports.IntegerType
 
 The module provides utilities for comparing DataFrames, which is essential for parity testing.
 
+`check_schema=True` compares ordered fields, field names, types, nested types,
+decimal precision and scale, nullability, and field metadata. A mapping
+expectation can provide a schema field such as `{"name": "id", "type": "long"}`.
+If the mapping omits its schema, only row values and columns inferred from those
+rows can be checked. These helpers collect their DataFrames; see the
+[comparison API contract](TESTING_PYTHON_API.md#comparison-semantics) for nested
+schema and ordering behavior.
+
 ### `assert_dataframes_equal`
 
 Assert two DataFrames are equivalent.
@@ -315,14 +338,17 @@ Get detailed comparison results without raising an exception.
 ```python
 from sparkless_testing import compare_dataframes
 
-result = compare_dataframes(df1, df2)
+def test_compare(spark):
+    actual_df = spark.createDataFrame([(1, "Ada")], ["id", "name"])
+    expected_df = spark.createDataFrame([(1, "Ada")], ["id", "name"])
+    result = compare_dataframes(actual_df, expected_df)
 
-if result.equivalent:
-    print("DataFrames match!")
-else:
-    print("Differences found:")
-    for error in result.errors:
-        print(f"  - {error}")
+    if result.equivalent:
+        print("DataFrames match!")
+    else:
+        print("Differences found:")
+        for error in result.errors:
+            print(f"  - {error}")
 ```
 
 ### `assert_rows_equal`
@@ -332,10 +358,10 @@ Compare row collections directly.
 ```python
 from sparkless_testing import assert_rows_equal
 
-rows1 = df1.collect()
-rows2 = df2.collect()
+actual = [{"id": 2, "name": "Bob"}, {"id": 1, "name": "Ada"}]
+expected = [{"id": 1, "name": "Ada"}, {"id": 2, "name": "Bob"}]
 
-assert_rows_equal(rows1, rows2, check_order=False)
+assert_rows_equal(actual, expected, order_matters=False)
 ```
 
 ---
@@ -410,10 +436,7 @@ class TestMyTransform:
     @pytest.mark.sparkless_only
     def test_sparkless_native_feature(self, spark, spark_imports):
         """Test sparkless-specific functionality."""
-        # Access sparkless native module
-        if spark_imports._native is not None:
-            # Test native functionality
-            pass
+        assert spark_imports._native is not None
 
     def test_dataframe_comparison(self, spark):
         """Test DataFrame comparison utilities."""
@@ -485,8 +508,8 @@ jobs:
         with:
           distribution: "temurin"
           java-version: "17"
-      - run: python -m pip install "sparkless[testing,pyspark4]==4.19.0"
-      - run: SPARKLESS_TEST_MODE=pyspark pytest tests/ -v
+      - run: python -m pip install "sparkless[testing]==4.19.0" "pyspark==4.0.5"
+      - run: SPARKLESS_TEST_MODE=pyspark SPARKLESS_PYSPARK_COMPAT=4.0 pytest tests/ -v
 ```
 
 ---
@@ -627,7 +650,11 @@ For repository development, use the [contributor setup](https://github.com/eddie
 
 ### Tests pass in sparkless but fail in PySpark
 
-This indicates a parity issue. Check [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md) for known divergences, or file an issue if you've found a new one.
+First confirm the selected backend, installed PySpark version, compatibility
+profile, and input/schema are the ones you intended. Then reduce the difference
+to a small example and check [known differences](PYSPARK_DIFFERENCES.md). Report
+remaining mismatches with both versions, actual backend identity, input schema,
+and expected and observed results.
 
 ### Session reuse
 

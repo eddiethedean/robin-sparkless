@@ -233,7 +233,7 @@ Follow the [shared performance protocol](RELEASE_4_19.md#performance-protocol-an
 
 Complete **Phase 4** after the Phase 3 source/ownership foundations. DuckDB now executes the advertised SQL/DataFrame plans and owns persistent table writes behind the existing Sparkless Connect endpoint. Polars remains the default backend; engine selection is explicit and fixed for a server instance's operations.
 
-Primary plan: [SS-15: DuckDB Connect backend](15-duckdb-connect-backend.md), with ordered slices 420-01–420-05.
+Primary plan: [SS-15: DuckDB Connect backend](15-duckdb-connect-backend.md), with ordered slices 420-01–420-06.
 
 Build on the separate DuckDB product and neutral server boundaries delivered under 4.19 SS-23/D22. Do not create another server/launcher stack or infer execution support from the already shipped source-enabled product name. D15 still owns actual DuckDB execution semantics and lifecycle proof.
 
@@ -242,6 +242,7 @@ Build on the separate DuckDB product and neutral server boundaries delivered und
 - Translate supported Spark semantics deliberately. DuckDB SQL acceptance alone does not establish Spark compatibility, and unsupported operations never silently select another engine.
 - Enable only enumerated writes with verified transaction/receipt behavior. Durable DuckDB data survives independently of the original ephemeral Polars catalog; no durable replay guarantee is assumed.
 - Verify independent DuckDB SQL and Sparkless Connect clients read/write the same database through a shared owner and generic configuration, using self-contained fixtures.
+- Complete [#1746](https://github.com/eddiethedean/robin-sparkless/issues/1746): make `sparkless-testing` schema checks detect nullability, metadata, decimal precision/scale, and nested type differences; use a mapping's declared schema when expected rows are empty. Run the regression cases against Sparkless and PySpark while keeping PySpark optional at runtime.
 
 ### Release gate
 
@@ -250,6 +251,7 @@ Build on the separate DuckDB product and neutral server boundaries delivered und
 - [ ] **V38** proves truthful transactional effects/receipts, duplicate/conflicting identities, deadline/commit/disconnect/cancel/restart cases, independent client read/write visibility, and numeric multi-client resource budgets.
 - [ ] Applicable V19–V24 lifecycle checks pass for DuckDB; V25 remains supplemental for any advertised third-party route. Reattach must not reexecute a query or mutation.
 - [ ] Optional dependency/build/platform boundaries, clean enabled/default installs, and public artifact verification pass at coordinated **4.20.0**. Neither server runtime requires Python or a JVM.
+- [ ] **420-06 / #1746** passes comparison regression coverage on Sparkless and PySpark, including empty mapping expectations; publish the corrected `sparkless-testing` package at coordinated **4.20.0**.
 
 ## 4.21.0 — Optional isolated Python workers
 

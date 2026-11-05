@@ -68,6 +68,19 @@ For a manually managed binary built with the `connect` Cargo feature, set
 address is `127.0.0.1:15002`. See the [deployment runbook](PRODUCTION.md) for
 network boundaries and readiness checks.
 
+To launch the packaged binary yourself, install the base server's Connect extra
+and run this in **Terminal 1**:
+
+```bash
+python -m pip install "sparkless-server[connect]==4.19.0"
+server_bin="$(python -c 'from sparkless_server import executable_path; print(executable_path())')"
+"$server_bin" serve --connect-host 127.0.0.1 --connect-port 15002 --disable-http
+```
+
+In **Terminal 2**, run the remote-session example above. For a separate client
+environment, install `sparkless-connect[client]==4.19.0`. Stop the server with
+Ctrl+C. The Connect extra pins `pyspark-client==4.0.5`; Java is not required.
+
 ## Share one server across pytest workers
 
 Copy [the example directory](https://github.com/eddiethedean/robin-sparkless/tree/main/examples/connect_xdist)

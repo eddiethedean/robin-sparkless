@@ -5,12 +5,16 @@ on:
   push:
     branches: [main]
     paths:
+      - 'README.md'
+      - 'python/README.md'
       - 'docs/**'
       - 'examples/**'
       - 'scripts/verify_published_doc_examples.py'
       - '.github/workflows/published-doc-examples.yml'
   pull_request:
     paths:
+      - 'README.md'
+      - 'python/README.md'
       - 'docs/**'
       - 'examples/**'
       - 'scripts/verify_published_doc_examples.py'

@@ -6,6 +6,45 @@ Use this guide for the in-process Python API. If your tests import
 
 This guide is for the **Sparkless v4** Python package: a PySpark-like API backed by the [robin-sparkless](https://github.com/eddiethedean/robin-sparkless) Rust engine. Sparkless 3.x uses the Polars **Python** package; 4.x uses the **Rust** crate (no Polars Python at runtime).
 
+## First run
+
+Install the local API in a Python 3.11 virtual environment, save the example as
+`first_dataframe.py`, and run it with the same interpreter. It prints one row
+whose name is `Bob`.
+
+```bash
+python3.11 -m venv .venv
+.venv/bin/python -m pip install "sparkless==4.19.0"
+.venv/bin/python first_dataframe.py
+```
+
+On Windows PowerShell, use the virtual environment's interpreter directly:
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install "sparkless==4.19.0"
+.\.venv\Scripts\python.exe first_dataframe.py
+```
+
+```python
+from sparkless.sql import SparkSession, functions as F
+
+spark = SparkSession.builder.app_name("first-run").get_or_create()
+try:
+    people = spark.createDataFrame(
+        [("Alice", 25), ("Bob", 30)], ["name", "age"]
+    )
+    result = people.filter(F.col("age") >= 30).select("name")
+    assert [row["name"] for row in result.collect()] == ["Bob"]
+    result.show()
+finally:
+    spark.stop()
+```
+
+No Java, PySpark, or Polars Python install is required for this local example.
+For wheel support by OS and architecture, see the
+[installation guide](INSTALLATION.md#platforms-and-build-features).
+
 ## Installation
 
 > **Before you adopt:** Read [Before you adopt](BEFORE_YOU_ADOPT.md) for UDF limits, parity gaps, and production caveats.
@@ -69,30 +108,7 @@ to create the repository-root uv environment, install development dependencies,
 and build the native extension with Maturin. Rebuild after changing Rust or PyO3
 code; an editable Python install alone does not rebuild the native library.
 
-## Quick Start
-
-### Basic Example
-
-```python
-from sparkless.sql import SparkSession, functions as F
-
-# Create session
-spark = SparkSession.builder.app_name("MyApp").get_or_create()
-
-# Create DataFrame
-data = [
-    {"id": 1, "name": "Alice", "age": 25},
-    {"id": 2, "name": "Bob", "age": 30},
-]
-df = spark.createDataFrame(data)
-
-# Operations work like PySpark
-result = df.filter(F.col("age") > 25).select("name")
-print(result.collect())
-
-df.show()
-spark.stop()
-```
+## Importing the API
 
 ### PySpark-style import swap
 
@@ -112,6 +128,9 @@ Check the [known differences](PYSPARK_DIFFERENCES.md) before assuming API or
 behavioral equivalence.
 
 ## Core Features
+
+The examples below reuse `spark` and `df` created in **DataFrame Operations**.
+Run them in that same Python session, or copy the setup block first.
 
 ### DataFrame Operations
 

@@ -15,3 +15,8 @@ cargo build --release -p sparkless-server-duckdb --no-default-features --feature
 
 Configure a trusted source in the deployment environment with `SPARKLESS_DUCKDB_SOURCES`. Clients
 send table names and cannot select database paths, credentials, or extension binaries.
+
+For the Python Spark Connect client, install the same published version with
+`pip install "sparkless-server-duckdb[connect]==4.19.0"`. See the
+[DuckDB quickstart](../../docs/DUCKDB_SOURCE.md), [deployment runbook](../../docs/PRODUCTION.md),
+and [release evidence](../../docs/RELEASE_EVIDENCE.md).

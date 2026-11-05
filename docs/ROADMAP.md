@@ -20,7 +20,7 @@ The current product release plan adds the native Sparkless Server to the existin
 | **4.17** | **4.17.0** | Shared catalog ownership, controlled mutations, richer logical schemas, and lazy native execution improvements |
 | **4.18** | **4.18.0** | Supported JVM-free Spark Connect, typed Arrow streaming, replay/release lifecycle, and separately verified emulator route |
 | **4.19** | **4.19.0** | Optional DuckDB data source, SparklessConnect context manager, and Connect/engine performance improvements ([#1736](https://github.com/eddiethedean/robin-sparkless/issues/1736), [#1737](https://github.com/eddiethedean/robin-sparkless/issues/1737), [#1738](https://github.com/eddiethedean/robin-sparkless/issues/1738)) |
-| **4.20** | **4.20.0** | Optional DuckDB execution backend for Connect |
+| **4.20** | **4.20.0** | Optional DuckDB execution backend for Connect; fix `sparkless-testing` schema comparisons ([#1746](https://github.com/eddiethedean/robin-sparkless/issues/1746)) |
 | **4.21** | **4.21.0** | Optional isolated Python workers and declared UDF forms |
 | **4.22** | **4.22.0** | Optional native Delta Lake / Unity Catalog interoperability |
 | **4.23** | **4.23.0** | Expanded Connect DataFrame API, types, analysis and settings |

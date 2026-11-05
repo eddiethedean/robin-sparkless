@@ -110,6 +110,23 @@ Run Python tests separately using the commands below. Use `make clean` when you 
 to reclaim Cargo build space. First builds can take
 substantial time; the duration depends on the selected features and host.
 
+### CI map
+
+Every pull request and push to `main` runs the required jobs in
+`.github/workflows/ci.yml`. Use the matching local command first:
+
+| Change | CI coverage | Local starting point |
+| --- | --- | --- |
+| Rust crate or engine | Format, Clippy, SQL/Delta/default-core tests, and server product checks | `cargo fmt --all -- --check`; `cargo test --locked -p <crate>` with required features |
+| Python API or test helpers | Build the native wheel, run Python tests, lint and type-check | Rebuild with Maturin, then `.venv/bin/python -m pytest tests/ -q` and `make lint-python` |
+| User documentation | Link/fence/version checks, API inventory, strict MkDocs build, installed-wheel examples | Follow [documentation checks](docs/DOCUMENTATION.md#checks) |
+| Server transport or launcher | Base and DuckDB server tests plus installed-wheel examples | Run the affected Rust crate tests and the matching [HTTP](docs/HTTP_API.md) or [Connect](docs/SPARK_CONNECT.md) example |
+
+The PySpark smoke and full Python suite are manual CI jobs. The separate
+**Published documentation examples** workflow installs release wheels from
+PyPI and runs the published local, testing, HTTP, Connect, and DuckDB guides;
+dispatch it after publication or when checking those install paths.
+
 Faster subsets:
 
 ```bash

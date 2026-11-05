@@ -73,9 +73,10 @@ aggregate return schema depends on expression aliases and input types.
 | `show(n=20, truncate=True)` | Prints formatted rows | Inspection only; not a data export |
 | `toPandas()` | pandas DataFrame | Requires pandas; complete materialization |
 | `toArrow()` | PyArrow Table | Requires PyArrow; complete materialization |
-| `toArrowBatches(max_rows=10000, max_bytes=67108864)` | Context-managed RecordBatch iterator | Positive per-batch bounds; oversized row raises ValueError |
+| `toArrowBatches(max_rows=10000, max_bytes=67108864)` | Context-managed RecordBatch iterator | Requires PyArrow; positive per-batch bounds; an oversized row raises `ValueError` |
 
 ```python
+# Install PyArrow first, for example with `python -m pip install "sparkless[dev]==4.19.0"`.
 from sparkless.sql import SparkSession
 spark = SparkSession.builder.app_name("arrow").get_or_create()
 try:
@@ -87,6 +88,12 @@ finally:
 
 Close batch iterators on early exit. Row/byte bounds apply to each output batch,
 not query intermediate memory or process RSS. See [cancellation](EXECUTION_CANCELLATION.md).
+
+The testing helper `assert_dataframes_equal(..., check_schema=True)` compares
+field order and names, primitive and nested types, decimal precision and scale,
+nullability, and metadata. Both DataFrames are collected. For expensive plans,
+prefer a focused schema assertion and bounded representative rows. See the
+[testing comparison contract](TESTING_PYTHON_API.md#comparison-semantics).
 
 ## Readers, writers, and catalog
 

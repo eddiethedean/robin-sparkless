@@ -70,6 +70,42 @@ the client-only `sparkless-connect[client]` install does not include a server or
 the local native engine. The `sparkless-testing` package has no runtime
 dependency on Sparkless, its native extension, or PySpark.
 
+### Verify the migration
+
+Use a clean environment and update the application's lock file with the exact
+package set it will deploy. This local smoke checks the installed version and
+executes a native query:
+
+```bash
+python3.11 -m venv .venv-419
+source .venv-419/bin/activate
+python -m pip install --upgrade pip
+python -m pip install --only-binary=:all: "sparkless==4.19.0"
+python -c 'import sparkless; assert sparkless.__version__ == "4.19.0"'
+python - <<'PY'
+from sparkless.sql import SparkSession, functions as F
+
+spark = SparkSession.builder.app_name("migration-check").get_or_create()
+try:
+    rows = spark.createDataFrame([(1,), (2,)], ["id"])
+    assert [row["id"] for row in rows.filter(F.col("id") > 1).collect()] == [2]
+finally:
+    spark.stop()
+PY
+```
+
+If you use the pytest plugin, install `sparkless[testing]==4.19.0`, register
+`sparkless_testing.plugin`, and run a representative test with
+`SPARKLESS_TEST_MODE=sparkless`. If you use PySpark as an oracle, validate it in
+a separate environment with the matching PySpark extra and Java runtime. Keep
+the expected import paths and package pins in your lock file; don't let an
+editable checkout hide a missing published dependency.
+
+To roll back, restore the previous lock file and recreate its environment. For
+the last published 4.18 line, pin `sparkless==4.18.1`; its native engine and
+server binary remain on 4.18.0. Do not mix 4.18 and 4.19 server, launcher, or
+testing packages in one environment.
+
 Sparkless 4.18 shipped the Spark Connect server and its process launcher.
 Callers created and stopped the PySpark session separately. The new 4.19
 [`SparklessConnect` context manager](SPARK_CONNECT.md#start-a-server-and-session)

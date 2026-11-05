@@ -4,6 +4,17 @@
 
 Source tag [v4.19.0](https://github.com/eddiethedean/robin-sparkless/tree/v4.19.0)
 identifies commit [43b0fbff](https://github.com/eddiethedean/robin-sparkless/commit/43b0fbff3c1b19e67774be5230d4c059ea1c3cb0).
+[CI run 41921768435](https://github.com/eddiethedean/robin-sparkless/actions/runs/41921768435)
+passed on that exact SHA. The tag-triggered
+[Release run 41930107216](https://github.com/eddiethedean/robin-sparkless/actions/runs/41930107216)
+passed release acceptance and published the Rust crates, testing helpers,
+launcher, native engine, server wheels, and container images. The `sparkless`
+API upload step also succeeded, but the run failed during its post-upload
+candidate inventory check: PyPI returned `.publish.attestation` sidecars with
+the wheel and source archive, and the verifier treated those extra files as an
+inventory mismatch. Coordinated public hash verification therefore did not
+complete in that run. The PyPI file pages below show the currently listed
+artifacts; do not treat the failed final check as a successful hash audit.
 
 | Distribution | Files in the public index |
 | --- | --- |
@@ -13,6 +24,8 @@ identifies commit [43b0fbff](https://github.com/eddiethedean/robin-sparkless/com
 | [sparkless-testing](https://pypi.org/project/sparkless-testing/4.19.0/#files) | Testing wheel and source archive |
 | [sparkless-server](https://pypi.org/project/sparkless-server/4.19.0/#files) | Linux x86_64 and macOS arm64 wheels |
 | [sparkless-server-duckdb](https://pypi.org/project/sparkless-server-duckdb/4.19.0/#files) | Linux x86_64 and macOS arm64 wheels |
+| [`ghcr.io/eddiethedean/sparkless-server:v4.19.0`](https://github.com/eddiethedean/robin-sparkless/pkgs/container/sparkless-server) | Published and smoke-tested; digest `sha256:bd872a2951e823cf97f571a58ddd4962e6c8e908212c786e893a81f485ee4103` |
+| [`ghcr.io/eddiethedean/sparkless-server-duckdb:v4.19.0`](https://github.com/eddiethedean/robin-sparkless/pkgs/container/sparkless-server-duckdb) | Published and smoke-tested; digest `sha256:6a86395161d77c05a8a3927b8d252f7fbde8528e38e89d8fb6edafe0b0285c09` |
 | [robin-sparkless](https://crates.io/crates/robin-sparkless/4.19.0) | Rust facade crate |
 | [spark-sql-parser](https://crates.io/crates/spark-sql-parser/4.19.0), [robin-sparkless-core](https://crates.io/crates/robin-sparkless-core/4.19.0), [robin-sparkless-polars](https://crates.io/crates/robin-sparkless-polars/4.19.0), [robin-sparkless-duckdb](https://crates.io/crates/robin-sparkless-duckdb/4.19.0) | Parser, engine contracts, Polars backend, and DuckDB source crates |
 | [robin-sparkless-plan](https://crates.io/crates/robin-sparkless-plan/4.19.0), [robin-sparkless-sql](https://crates.io/crates/robin-sparkless-sql/4.19.0), [robin-sparkless-delta](https://crates.io/crates/robin-sparkless-delta/4.19.0), [robin-sparkless-jdbc](https://crates.io/crates/robin-sparkless-jdbc/4.19.0), [robin-sparkless-jdbc-polars](https://crates.io/crates/robin-sparkless-jdbc-polars/4.19.0) | Plan, SQL, Delta, and JDBC crates |

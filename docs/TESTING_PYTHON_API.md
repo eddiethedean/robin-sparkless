@@ -17,3 +17,24 @@ Use `pytest_plugins = ["sparkless_testing.plugin"]` in the suite's root
 The pytest plugin owns sessions returned by its fixtures. For fixture scope,
 markers, and the full comparison example, see the [testing guide](TESTING_GUIDE.md).
 For Spark Connect session ownership, see the [server launcher API](SERVER_PYTHON_API.md).
+
+## Comparison semantics
+
+`assert_dataframes_equal` and `compare_dataframes` collect both DataFrames.
+With `check_schema=True`, they compare field order, names, primitive and nested
+types, decimal precision and scale, nullability, and field metadata. Schema
+checking applies to two DataFrames or to a mapping whose `schema` contains
+`fields`. A mapping may declare fields with `name`, `type`, and optional
+`nullable` and `metadata` values. Type names accept Spark spellings such as
+`long` or `bigint`.
+
+```python
+from sparkless_testing import assert_dataframes_equal, assert_rows_equal
+
+assert_dataframes_equal(actual_df, expected_df, check_schema=True)
+assert_rows_equal(actual_df.collect(), expected_df.collect(), order_matters=False)
+```
+
+Use `order_matters=False` only when result ordering is outside the contract.
+`check_schema=False` skips schema equality while still comparing collected
+values and columns. These helpers are intended for bounded test data.

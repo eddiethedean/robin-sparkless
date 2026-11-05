@@ -4,7 +4,8 @@ Owner: repository maintainers; feature authors own the accuracy of the pages
 and examples their changes affect. Release maintainer reviews the coordinated
 version contract before a cut. Reviewed version/date are recorded in
 `docs/reference/release.json` and shown on every built page. This metadata is a
-review record, not automatic evidence that every old page was checked.
+review record, not automatic evidence that every old page was checked or that
+Read the Docs routes its `stable` alias to this release.
 
 ## Sources of truth
 
@@ -14,6 +15,7 @@ review record, not automatic evidence that every old page was checked.
 | Supported behavior by surface | SUPPORT_MATRIX plus executable regressions/oracle examples |
 | Signatures | Installed-wheel generated Python symbol inventory; pinned rustdoc |
 | Current release requirements | RELEASING |
+| Hosted docs version and `stable` alias | Read the Docs project Versions settings |
 | Known security exception | Versioned security notice and checked security policy files |
 | Plans / past counts / experiments | Archive, never current capability authority |
 
@@ -74,11 +76,15 @@ or provide a redirect/signpost when renaming a current page.
    HTTP, Connect, and DuckDB guides in separate PyPI environments. Run it after
    the publication update lands. The normal docs example job also checks the
    built wheel and the two pinned PySpark reference runtimes.
-3. Verify the rendered [Read the Docs latest site](https://robin-sparkless.readthedocs.io/en/latest/)
-   shows the expected version and package instructions. Check the stable
-   version separately if the host exposes it. Source tags record the docs at
-   the cut. Fixes merged later appear in the main branch's manual after the
-   host rebuilds it.
+3. In the Read the Docs project **Versions** settings, activate the new release
+   tag and point the `stable` alias at it after publication. Verify the rendered
+   [latest site](https://robin-sparkless.readthedocs.io/en/latest/) and
+   [stable site](https://robin-sparkless.readthedocs.io/en/stable/) separately;
+   check the install command, version banner, migration links, and quickstart
+   examples on both. The versioned route uses the slug configured by Read the
+   Docs, so copy it from the Versions page instead of assuming a `v` prefix.
+   Source tags record the docs at the cut. Fixes merged later appear in the
+   main branch's manual after the host rebuilds it.
 4. Open the versioned docs.rs API route and record its availability. Keep the
    [pinned rustdoc build](RUST_API_REFERENCE.md) available for offline use.
 

@@ -1,6 +1,6 @@
 # Embedding robin-sparkless
 
-This guide summarizes how to embed robin-sparkless in your app or binding (e.g. PyO3, Node, CLI) with a minimal, stable surface.
+This guide summarizes the supported 4.19 embedding surface for applications and bindings such as PyO3, Node, and CLI tools.
 
 ## Recommended embedding API
 

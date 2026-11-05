@@ -64,13 +64,47 @@ compatible wheel.
 
 ## Platforms and build features
 
-The API wheel is universal; the separate `sparkless-native` extension wheels use **cp311-abi3**, compatible with supported CPython 3.11–3.14,
-not only CPython 3.11. Wheels cover Linux glibc 2.17+ on x86_64, glibc 2.28+ on ARM64,
-and musl 1.2+ on both architectures,
-macOS Intel/Apple Silicon, and Windows x86_64/ARM64. Use wheel filenames for exact
-macOS deployment floors (the ARM64 extension starts at macOS 11; the separate
-server starts at macOS 14). Server binaries cover glibc 2.28+ Linux x86_64 and
-macOS 14+ ARM64 only. Other targets require a source build.
+The API and test-helper wheels are pure Python. The `sparkless-native` extension
+uses the CPython 3.11 stable ABI and publishes wheels for CPython 3.11–3.14.
+The server is distributed as a separate platform-specific executable. Use this
+table to choose an install path:
+
+| Product | Published wheel targets | Minimum platform details |
+| --- | --- | --- |
+| `sparkless-native` | Linux x86_64 and ARM64, macOS Intel and Apple Silicon, Windows x86_64 and ARM64 | Linux x86_64 glibc 2.17; Linux ARM64 glibc 2.28; Linux x86_64 and ARM64 musl 1.2; macOS x86_64 10.12 and ARM64 11; Windows x86_64 and ARM64 |
+| `sparkless-server` and `sparkless-server-duckdb` | Linux x86_64 and macOS ARM64 | Linux glibc 2.28; macOS 14 |
+| `sparkless`, `sparkless-testing`, `sparkless-connect` | Platform independent | Python 3.11 or newer. Published native wheels currently cover CPython through 3.14. |
+
+The extension wheel and server executable have different platform support.
+Windows and Linux ARM64 can run the local API from its native wheel but have
+no published Sparkless server executable. Confirm the exact release's
+[PyPI file list](https://pypi.org/project/sparkless-native/4.19.0/#files)
+before pinning a deployment image. Other native targets require a source build
+with the repository's pinned Rust toolchain and a platform C/C++ linker.
+
+To check wheel availability without allowing pip to fall back to an sdist:
+
+```bash
+python -m pip install --only-binary=:all: "sparkless-native==4.19.0"
+```
+
+If pip reports no compatible distribution, record the interpreter and platform
+tags before choosing another route:
+
+```bash
+python -c "import platform, sys; print(sys.version); print(platform.platform(), platform.machine())"
+python -m pip debug --verbose
+python -m pip show sparkless sparkless-native
+```
+
+An sdist install attempts a local native build. It needs the pinned Rust
+toolchain, Maturin, a C/C++ toolchain, and the source-build dependencies in
+[contributor setup](https://github.com/eddiethedean/robin-sparkless/blob/main/CONTRIBUTING.md#setup).
+On Windows, install Visual Studio C++ Build Tools. On macOS, install Xcode
+Command Line Tools. On Linux, install the compiler and linker for the target
+architecture. The packaged server wheel has no user-facing source fallback
+install path. Build its executable with Cargo as described in the
+[server crate guide](https://github.com/eddiethedean/robin-sparkless/blob/v4.19.0/crates/sparkless-server/README.md).
 
 | Distribution | SQL | Delta | Database drivers |
 | --- | --- | --- | --- |

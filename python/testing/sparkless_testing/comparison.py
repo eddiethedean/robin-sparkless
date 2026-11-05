@@ -8,9 +8,10 @@ for floating point values, dates, and other types.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 
 @dataclass
@@ -110,12 +111,14 @@ def compare_dataframes(
     try:
         actual_columns = actual.columns
         if isinstance(expected, dict):
-            # Use first row that is a dict for column names; avoid IndexError/AttributeError
-            first_dict = next(
-                (r for r in expected_data if isinstance(r, dict)),
-                None,
-            )
-            expected_columns = list(first_dict.keys()) if first_dict else []
+            # The schema remains useful for empty expected results.
+            expected_columns = _schema_column_names(expected_schema)
+            if expected_columns is None:
+                first_dict = next(
+                    (r for r in expected_data if isinstance(r, dict)),
+                    None,
+                )
+                expected_columns = list(first_dict.keys()) if first_dict else []
         else:
             expected_columns = expected.columns
 
@@ -371,39 +374,174 @@ def _sort_key_value(value: Any) -> Tuple[int, str]:
 
 
 def _compare_schemas(actual_schema: Any, expected_schema: Any) -> bool:
-    """Compare two schemas for equality."""
-    try:
-        actual_fields = actual_schema.fields if hasattr(actual_schema, "fields") else []
-        expected_fields = (
-            expected_schema.fields if hasattr(expected_schema, "fields") else []
-        )
+    """Compare schema fields, nullability, metadata, and nested data types."""
+    actual_fields = _schema_fields(actual_schema)
+    expected_fields = _schema_fields(expected_schema)
+    if actual_fields is None or expected_fields is None:
+        return False
+    if len(actual_fields) != len(expected_fields):
+        return False
 
-        if len(actual_fields) != len(expected_fields):
+    for actual_field, expected_field in zip(actual_fields, expected_fields):
+        actual_name = _field_value(actual_field, "name")
+        expected_name = _field_value(expected_field, "name")
+        if actual_name != expected_name:
             return False
 
-        for actual_field, expected_field in zip(actual_fields, expected_fields):
-            actual_name = getattr(actual_field, "name", None)
-            expected_name = getattr(expected_field, "name", None)
-            if actual_name != expected_name:
-                return False
+        actual_type = _field_value(actual_field, "dataType", "data_type", "type")
+        expected_type = _field_value(expected_field, "dataType", "data_type", "type")
+        if actual_type is None or expected_type is None:
+            return False
+        if not _compare_types(actual_type, expected_type):
+            return False
 
-            actual_type = getattr(actual_field, "dataType", None)
-            expected_type = getattr(expected_field, "dataType", None)
-            if not _compare_types(actual_type, expected_type):
-                return False
+        actual_nullable = _field_value(actual_field, "nullable")
+        expected_nullable = _field_value(expected_field, "nullable")
+        if (
+            expected_nullable is not None
+            and actual_nullable is not None
+            and actual_nullable != expected_nullable
+        ):
+            return False
 
-        return True
-    except Exception:
-        return False
+        actual_metadata = _field_value(actual_field, "metadata")
+        expected_metadata = _field_value(expected_field, "metadata")
+        if (
+            expected_metadata is not None
+            and actual_metadata is not None
+            and actual_metadata != expected_metadata
+        ):
+            return False
+
+    return True
 
 
 def _compare_types(actual_type: Any, expected_type: Any) -> bool:
-    """Compare two data types for equality."""
-    if actual_type is None and expected_type is None:
-        return True
+    """Compare primitive and nested Spark-compatible data types."""
     if actual_type is None or expected_type is None:
         return False
 
-    actual_name = actual_type.__class__.__name__
-    expected_name = expected_type.__class__.__name__
-    return bool(actual_name == expected_name)
+    actual_kind = _type_kind(actual_type)
+    expected_kind = _type_kind(expected_type)
+    if actual_kind != expected_kind:
+        return False
+
+    if actual_kind == "decimal":
+        actual_precision, actual_scale = _decimal_parameters(actual_type)
+        expected_precision, expected_scale = _decimal_parameters(expected_type)
+        return actual_precision == expected_precision and actual_scale == expected_scale
+
+    if actual_kind == "struct":
+        return _compare_schemas(actual_type, expected_type)
+
+    if actual_kind == "array":
+        actual_element = _type_property(actual_type, "elementType", "element_type")
+        expected_element = _type_property(expected_type, "elementType", "element_type")
+        actual_nullable = _type_property(actual_type, "containsNull", "contains_null")
+        expected_nullable = _type_property(expected_type, "containsNull", "contains_null")
+        return _compare_types(actual_element, expected_element) and (
+            expected_nullable is None
+            or actual_nullable is None
+            or actual_nullable == expected_nullable
+        )
+
+    if actual_kind == "map":
+        actual_key = _type_property(actual_type, "keyType", "key_type")
+        expected_key = _type_property(expected_type, "keyType", "key_type")
+        actual_value = _type_property(actual_type, "valueType", "value_type")
+        expected_value = _type_property(expected_type, "valueType", "value_type")
+        actual_nullable = _type_property(
+            actual_type, "valueContainsNull", "value_contains_null"
+        )
+        expected_nullable = _type_property(
+            expected_type, "valueContainsNull", "value_contains_null"
+        )
+        return (
+            _compare_types(actual_key, expected_key)
+            and _compare_types(actual_value, expected_value)
+            and (
+                expected_nullable is None
+                or actual_nullable is None
+                or actual_nullable == expected_nullable
+            )
+        )
+
+    return _normalize_type_name(_type_name(actual_type)) == _normalize_type_name(
+        _type_name(expected_type)
+    )
+
+
+def _schema_fields(schema: Any) -> Optional[List[Any]]:
+    if isinstance(schema, Mapping):
+        fields = schema.get("fields")
+    elif isinstance(schema, (list, tuple)):
+        fields = schema
+    else:
+        fields = getattr(schema, "fields", None)
+    return list(fields) if isinstance(fields, (list, tuple)) else None
+
+
+def _schema_column_names(schema: Any) -> Optional[List[str]]:
+    fields = _schema_fields(schema)
+    if fields is None:
+        return None
+    names = [_field_value(field, "name") for field in fields]
+    if any(name is None for name in names):
+        return None
+    return names
+
+
+def _field_value(field: Any, *names: str) -> Any:
+    for name in names:
+        if isinstance(field, Mapping) and name in field:
+            return field[name]
+        if hasattr(field, name):
+            return getattr(field, name)
+    return None
+
+
+def _normalize_type_name(type_name: Any) -> Any:
+    if not isinstance(type_name, str):
+        return type_name
+    return (
+        re.sub(r"[\s_-]+", "", type_name.lower())
+        .replace("integer", "int")
+        .replace("bigint", "long")
+    )
+
+
+def _type_kind(data_type: Any) -> Any:
+    if isinstance(data_type, Mapping):
+        return _normalize_type_name(data_type.get("type"))
+    if isinstance(data_type, str):
+        return _normalize_type_name(data_type.split("(", 1)[0].split("<", 1)[0])
+    class_name = data_type.__class__.__name__
+    if class_name.endswith("Type"):
+        return _normalize_type_name(class_name[:-4])
+    return _normalize_type_name(_type_name(data_type))
+
+
+def _type_property(data_type: Any, *names: str) -> Any:
+    return _field_value(data_type, *names)
+
+
+def _decimal_parameters(data_type: Any) -> Tuple[Any, Any]:
+    precision = _type_property(data_type, "precision")
+    scale = _type_property(data_type, "scale")
+    if precision is None or scale is None:
+        type_name = re.sub(r"\s+", "", str(_type_name(data_type)))
+        match = re.fullmatch(r"decimal\((\d+),(\d+)\)", type_name)
+        if match:
+            return int(match.group(1)), int(match.group(2))
+    return precision, scale
+
+
+def _type_name(data_type: Any) -> Any:
+    if isinstance(data_type, str):
+        return data_type
+    if data_type is None:
+        return None
+    simple_string = getattr(data_type, "simpleString", None)
+    if callable(simple_string):
+        return simple_string()
+    return data_type.__class__.__name__

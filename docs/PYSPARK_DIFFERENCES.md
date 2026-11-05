@@ -1,4 +1,4 @@
-# Differences from PySpark — 4.18.0
+# Differences from PySpark — 4.19.0
 
 Sparkless implements a local PySpark-style API on Polars. It is not a full Spark
 runtime. This page describes the installed local API; [the support matrix](SUPPORT_MATRIX.md)

@@ -1,16 +1,20 @@
 # Rust API reference — 4.19.0
 
-Build full rustdoc from the published source tag using the pinned toolchain.
-This works independently of hosted build or artifact retention.
+Build rustdoc for every workspace crate from the published source tag. Use the
+repository-pinned Rust toolchain, **1.93.1**. This works independently of hosted
+builds or artifact retention.
 
 ```bash
 git clone --branch v4.19.0 --depth 1 https://github.com/eddiethedean/robin-sparkless.git
 cd robin-sparkless
-cargo doc --locked -p robin-sparkless --features sql --no-deps --open
+cargo doc --locked --workspace --all-features --no-deps --open
 ```
 
-The entry page is `target/doc/robin_sparkless/index.html`. CI also retains a
-`rust-api-docs` artifact for the commit it built. The
+The workspace index is `target/doc/index.html`; the facade entry page is
+`target/doc/robin_sparkless/index.html`. `--all-features` shows APIs behind
+optional SQL, Delta, database, and server features. CI currently retains a
+smaller `rust-api-docs` artifact for the root facade only, built with
+`cargo doc --locked -p robin-sparkless --features sql --no-deps`. The
 [4.19.0 docs.rs API route](https://docs.rs/robin-sparkless/4.19.0/robin_sparkless/)
 was unavailable at review. The [source tag](https://github.com/eddiethedean/robin-sparkless/tree/v4.19.0)
 and [crate listing](https://crates.io/crates/robin-sparkless/4.19.0) identify the release.

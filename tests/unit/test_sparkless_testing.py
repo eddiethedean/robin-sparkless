@@ -581,6 +581,93 @@ class TestComparisonDataFrames:
         result = compare_dataframes(df1, df2, check_schema=False)
         assert result.equivalent is True
 
+    def test_compare_dataframes_detects_nullability_difference(self, spark, spark_imports):
+        """Schema comparison includes top-level field nullability."""
+        from sparkless_testing import compare_dataframes
+
+        types = spark_imports
+        nullable = types.StructType(
+            [types.StructField("id", types.LongType(), nullable=True)]
+        )
+        required = types.StructType(
+            [types.StructField("id", types.LongType(), nullable=False)]
+        )
+        actual = spark.createDataFrame([(1,)], nullable)
+        expected = spark.createDataFrame([(1,)], required)
+
+        result = compare_dataframes(actual, expected)
+
+        assert result.equivalent is False
+        assert result.schema_match is False
+
+    def test_compare_dataframes_detects_decimal_precision_difference(
+        self, spark, spark_imports
+    ):
+        """Schema comparison includes decimal precision and scale."""
+        from decimal import Decimal
+
+        from sparkless_testing import compare_dataframes
+
+        types = spark_imports
+        narrow = types.StructType(
+            [types.StructField("amount", types.DecimalType(8, 2), nullable=True)]
+        )
+        wide = types.StructType(
+            [types.StructField("amount", types.DecimalType(10, 2), nullable=True)]
+        )
+        actual = spark.createDataFrame([(Decimal("1.00"),)], narrow)
+        expected = spark.createDataFrame([(Decimal("1.00"),)], wide)
+
+        result = compare_dataframes(actual, expected)
+
+        assert result.equivalent is False
+        assert result.schema_match is False
+
+    def test_compare_dataframes_detects_nested_array_nullability(
+        self, spark, spark_imports
+    ):
+        """Schema comparison includes array element nullability."""
+        from sparkless_testing import compare_dataframes
+
+        types = spark_imports
+        nullable_elements = types.StructType(
+            [
+                types.StructField(
+                    "values", types.ArrayType(types.IntegerType(), containsNull=True)
+                )
+            ]
+        )
+        required_elements = types.StructType(
+            [
+                types.StructField(
+                    "values", types.ArrayType(types.IntegerType(), containsNull=False)
+                )
+            ]
+        )
+        actual = spark.createDataFrame([([1],)], nullable_elements)
+        expected = spark.createDataFrame([([1],)], required_elements)
+
+        result = compare_dataframes(actual, expected)
+
+        assert result.equivalent is False
+        assert result.schema_match is False
+
+    def test_compare_dataframes_uses_schema_for_mapping_expected(self, spark):
+        """Mapping expectations compare declared fields, even for empty rows."""
+        from sparkless_testing import compare_dataframes
+
+        actual = spark.createDataFrame([], "id: long")
+        expected = {
+            "schema": [{"name": "id", "type": "long"}],
+            "data": [],
+        }
+
+        result = compare_dataframes(actual, expected)
+
+        assert result.equivalent is True
+        assert result.schema_match is True
+        assert result.column_match is True
+
     def test_assert_dataframes_equal_matching(self, spark):
         """assert_dataframes_equal passes for matching DataFrames."""
         from sparkless_testing import assert_dataframes_equal

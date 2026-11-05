@@ -2,9 +2,8 @@
 
 Polars-backed implementation of [robin-sparkless](https://github.com/eddiethedean/robin-sparkless): `SparkSession`, `DataFrame`, `DataFrameReader`, `Column`, expression functions, UDFs, and plan execution. This is the **only crate in the workspace that depends on Polars**; the root crate is a thin facade that re-exports the public API.
 
-**4.17.0 security notice:** crates.io builds retain a temporary zstd risk
-exception. Apply the pinned consumer Cargo patches before reading untrusted
-compressed input. See the [exposure, expiry, and patch instructions](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/security/zstd-4.17-exception.md).
+For current dependency status and consumer guidance, see the versioned
+[security guide](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/SECURITY.md).
 
 [![crates.io](https://img.shields.io/crates/v/robin-sparkless-polars.svg)](https://crates.io/crates/robin-sparkless-polars)
 [![docs.rs](https://docs.rs/robin-sparkless-polars/badge.svg)](https://docs.rs/robin-sparkless-polars)
@@ -14,7 +13,7 @@ compressed input. See the [exposure, expiry, and patch instructions](https://git
 
 | Area | Description |
 |------|-------------|
-| **Session** | `SparkSession`, `SparkSessionBuilder`, `DataFrameReader` — read CSV/Parquet/JSON/Delta, `create_dataframe_*`, `sql`, catalog (temp views, tables) |
+| **Session** | `SparkSession`, `SparkSessionBuilder`, `DataFrameReader` — read CSV/Parquet/JSON, optional Delta, `create_dataframe_*`, optional SQL, catalog (temp views, tables) |
 | **DataFrame** | `DataFrame`, `GroupedData`, `CubeRollupData`, `PivotedGroupedData` — filter, select, join, group_by, order_by, window, collect |
 | **Column / Expr** | `Column`, Polars `Expr` — built via `functions::*` (e.g. `col`, `lit_*`, `when`, aggregations, string/datetime/struct/map) |
 | **UDFs** | `UdfRegistry`, `RustUdf`, `apply_*` implementations used by expression layer |
@@ -26,23 +25,25 @@ Implements the engine traits from `robin-sparkless-core` and converts `ExprIr` t
 
 ## Usage
 
-Most users depend on the main crate, which pulls in this crate and re-exports the API:
+Most users depend on the main crate, which re-exports the API. This repository's
+4.19.0 quickstart is tested with Rust 1.93.1 and explicitly enables SQL:
 
 ```toml
 [dependencies]
-robin-sparkless = { version = "4", features = ["sql"] }
+robin-sparkless = { version = "=4.19.0", features = ["sql"] }
 ```
+
+Start with the [runnable Rust quickstart](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/QUICKSTART.md)
+and [API reference](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/RUST_API_REFERENCE.md).
 
 If you need to depend on the Polars backend directly (e.g. for a custom build or integration):
 
 ```toml
 [dependencies]
-robin-sparkless-core = "4"
-robin-sparkless-polars = { version = "4", features = ["sql", "delta"] }
+robin-sparkless-core = "=4.19.0"
+robin-sparkless-polars = { version = "=4.19.0", features = ["sql", "delta"] }
 ```
 
 ## License
 
 MIT. See the [repository](https://github.com/eddiethedean/robin-sparkless) for details.
-
-Rust consumers: review the [4.18 zstd dependency notice](../../docs/security/zstd-4.18-exception.md) and its pinned mitigation; the unpatched graph exception expires 2026-11-26.

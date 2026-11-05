@@ -13,7 +13,10 @@ starting a Spark cluster.
 
 ## Get started
 
-Requires **Python 3.11+**:
+Requires CPython **3.11–3.14** for the published native wheels. Package metadata
+declares Python 3.11 or newer, so later Python versions may install from source
+when a compatible native wheel is not available. See the
+[platform table](docs/INSTALLATION.md#platforms-and-build-features).
 
 ```bash
 python -m pip install "sparkless==4.19.0"
@@ -42,7 +45,7 @@ It runs on one machine and implements a subset of PySpark behavior. Read
 | [Python getting started](docs/python_getting_started.md) | Installation, platforms, extras, and examples |
 | [Python API](docs/PYTHON_API_REFERENCE.md) | DataFrames, functions, SQL, and Arrow export |
 | [Testing](docs/TESTING_GUIDE.md) | One test suite with Sparkless and PySpark |
-| [Spark Connect server](docs/SPARK_CONNECT.md) | Run the real PySpark client against a native Sparkless server |
+| [Spark Connect server](docs/SPARK_CONNECT.md) | Run the pinned PySpark Connect client against the supported Sparkless plan subset |
 | [DuckDB table sources](docs/DUCKDB_SOURCE.md) | Read a local DuckDB test database through Spark Connect |
 | [4.19 migration](docs/python_migration.md#from-sparkless-418-to-419) | Choose the new packages and update your imports |
 | [Rust quickstart](docs/QUICKSTART.md) | Embed the `robin-sparkless` engine |

@@ -7,6 +7,10 @@ Review the [compatibility policy](docs/SUPPORT.md) before upgrading across relea
 
 ## [Unreleased]
 
+### Fixed
+
+- **Testing schema comparisons** — compare field nullability, metadata when supplied, decimal precision/scale, and nested struct/array/map types in `compare_dataframes()` ([#1746](https://github.com/eddiethedean/robin-sparkless/issues/1746)).
+
 ## [4.19.0] - 2026-11-05
 
 **Breaking changes:** 4.19 changes Rust engine/server contracts and reorganizes Python package boundaries despite the minor-version number. See the [4.19 migration guide](docs/MIGRATION_4_19.md) and [Python package migration](docs/python_migration.md).
@@ -74,6 +78,23 @@ Tagged on 2026-10-30; publication is incomplete. Rust crates, server wheels and 
 - **Server shutdown and version** — drain on SIGTERM and expose `sparkless-server --version` without runtime configuration.
 - **Dependency security** — update Tokio and `ctutils` past RUSTSEC-2026-0386 and RUSTSEC-2026-0385, and replace yanked `chacha20` 0.10.0 with 0.10.2. Official artifacts use fixed zstd implementations. The pinned [Rust consumer Cargo patch](security/zstd-4.17-patches.toml) also fixes the registry consumer graph when applied at the application root. Ordinary unpatched Rust builds retain the disclosed, temporary exception above.
 - **Python source builds** — lock `ethnum` to 1.5.3, fixing its invalid error-value transmute in isolated native-extension builds.
+
+## [4.16.1] - 2026-10-24
+
+### Fixed
+
+- Export the packaged server executable locator required by the `sparkless[server]` launcher.
+
+## [4.16.0] - 2026-10-23
+
+### Added
+
+- **Native SQL server** — add the optional `sparkless-server` HTTP SQL service, bounded read-only query execution, session lifecycle, readiness/control protocol, and synchronous/asynchronous `SparklessServer` launcher.
+- **Server distributions** — add platform-specific `sparkless-server-bin` wheels, a JVM-free Linux container build, and release metadata checks.
+
+### Changed
+
+- Align first-party Rust and Python package versions at 4.16.0, including the SQL parser.
 
 ## [4.15.3] - 2026-10-22
 

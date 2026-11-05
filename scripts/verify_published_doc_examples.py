@@ -1,4 +1,4 @@
-"""Run the published package quickstarts from a clean working directory."""
+"""Run published package quickstarts and README examples from a clean directory."""
 
 from __future__ import annotations
 
@@ -28,6 +28,17 @@ def run_quickstart(work: Path, page: str) -> None:
     run(work, script.name)
 
 
+def run_readme_examples(work: Path, page: str) -> None:
+    text = (ROOT / page).read_text()
+    blocks = re.findall(r"^```python\n(.*?)^```", text, re.M | re.S)
+    if not blocks:
+        raise ValueError(f"Missing Python example in {page}")
+    for index, block in enumerate(blocks):
+        script = work / f"{Path(page).parent.name or 'root'}_readme_{index}.py"
+        script.write_text(block)
+        run(work, script.name)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -39,6 +50,8 @@ def main() -> None:
         work = Path(directory)
         if args.profile == "local":
             run(work, str(examples / "basic_usage.py"))
+            run_readme_examples(work, "README.md")
+            run_readme_examples(work, "python/README.md")
         elif args.profile == "testing":
             for name in ("conftest.py", "test_pipeline_example.py"):
                 shutil.copy2(examples / name, work)

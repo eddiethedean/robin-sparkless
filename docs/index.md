@@ -10,11 +10,11 @@ hide:
 
 <p class="sparkless-eyebrow">Python · Spark Connect · Rust</p>
 
-# Run PySpark-style tests **without a JVM**
+# Run DataFrame workloads locally **without a JVM**
 
-Sparkless runs DataFrame and SQL workloads on a single machine using Rust and
-Polars. Use the local Python API, connect with the PySpark client, or embed the
-engine in a Rust application.
+Sparkless runs PySpark-style DataFrame and SQL code on a single machine using
+Rust and Polars. Use its local Python API without Java, keep the PySpark client
+for supported remote plans, or embed the engine in a Rust application.
 
 [Install Sparkless](INSTALLATION.md){ .md-button .md-button--primary }
 [See what’s supported](SUPPORT_MATRIX.md){ .md-button }

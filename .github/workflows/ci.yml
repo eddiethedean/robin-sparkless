@@ -568,6 +568,7 @@ jobs:
           DOCS_ORACLE: ${{ matrix.oracle }}
         run: |
           python -m pip install dist/*.whl pytest pyarrow pandas
+          python -m pip install ./python/connect
           if [[ -n "$DOCS_ORACLE" ]]; then
             python -m pip install "pyspark==$DOCS_ORACLE"
           fi

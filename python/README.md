@@ -12,7 +12,10 @@ Spark cluster.
 
 ## Install
 
-Requires **Python 3.11+**:
+Requires CPython **3.11–3.14** for the published native wheels. Package
+metadata declares Python 3.11 or newer. See the
+[platform table](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/INSTALLATION.md#platforms-and-build-features)
+for architectures and operating system floors.
 
 ```bash
 python -m pip install "sparkless==4.19.0"
@@ -51,7 +54,7 @@ and [PyPI files](https://pypi.org/project/sparkless/#files) for your release.
 | [Getting started](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/python_getting_started.md) | Installation, extras, and examples |
 | [Python API](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/PYTHON_API_REFERENCE.md) | DataFrames, functions, SQL, and Arrow export |
 | [Testing](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/TESTING_GUIDE.md) | Run the same tests with Sparkless and PySpark |
-| [Spark Connect](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/SPARK_CONNECT.md) | Native server setup and the 4.18 supported subset |
+| [Spark Connect](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/SPARK_CONNECT.md) | Native server setup and the 4.19 supported plan subset |
 
 [Full documentation](https://robin-sparkless.readthedocs.io/) ·
 [Source and contributing](https://github.com/eddiethedean/robin-sparkless/blob/main/CONTRIBUTING.md) ·
