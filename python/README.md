@@ -15,7 +15,7 @@ Spark cluster.
 Requires **Python 3.11+**:
 
 ```bash
-python -m pip install "sparkless>=4,<5"
+python -m pip install "sparkless==4.19.0"
 ```
 
 ## Quick start

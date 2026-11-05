@@ -1,84 +1,66 @@
-# Installation and versions
+# Install Sparkless 4.19.0
 
-Choose the version first. **4.18.1** is the published stable Python API
-recorded here. It uses the **4.18.0** native engine and optional server.
-The **4.19.0 candidate** introduces new packages and imports.
+Create a Python 3.11 virtual environment. Use its Python executable for both
+installation and examples.
 
-| I want to… | Start here |
-| --- | --- |
-| Install a stable release from PyPI | [Install 4.18.1](#install-the-published-api) |
-| Evaluate the 4.19 package split | [Try candidate wheels](#try-the-419-candidate) |
-| Move an existing 4.18 project to 4.19 | [Python migration](python_migration.md#from-sparkless-418-to-419) |
-| Build the engine or a custom native feature | [Python source setup](python_getting_started.md#from-source-contributors) or [Rust quickstart](QUICKSTART.md) |
+=== "macOS and Linux"
 
-## Install the published API
+    ```bash
+    python3.11 -m venv .venv
+    source .venv/bin/activate
+    ```
+
+=== "Windows PowerShell"
+
+    ```powershell
+    py -3.11 -m venv .venv
+    .\.venv\Scripts\Activate.ps1
+    ```
+
+## Choose a package
+
+Copy the install spec for your workflow. Use quotes around specs with extras.
+
+| Workflow | PyPI install spec | Main import | Wheel requirements |
+| --- | --- | --- | --- |
+| Local DataFrames and SQL | `sparkless==4.19.0` | `sparkless.sql` | Native engine |
+| Local pytest fixtures | `sparkless[testing]==4.19.0` | `sparkless_testing.plugin` | Native engine |
+| Testing helpers only | `sparkless-testing==4.19.0` | `sparkless_testing` | Pure Python |
+| Base HTTP server | `sparkless-server==4.19.0` | `sparkless_server` | Server wheel |
+| Own a base server and Connect session | `sparkless-server[connect]==4.19.0` | `sparkless_server.SparklessConnect` | Server wheel |
+| Read configured DuckDB sources | `sparkless-server-duckdb[connect]==4.19.0` | `sparkless_server_duckdb.SparklessConnect` | Server wheel |
+| Connect to an existing endpoint | `sparkless-connect[client]==4.19.0` | `pyspark.sql` | Client dependencies for your platform |
+
+For the local API:
 
 ```bash
-python3.11 -m venv .venv
-# POSIX; Windows: .venv\Scripts\activate
-. .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install "sparkless==4.18.1"
+python -m pip install "sparkless==4.19.0"
 python -c "import sparkless; print(sparkless.__version__)"
 ```
 
-Use the [4.18.1 source documentation](https://github.com/eddiethedean/robin-sparkless/tree/v4.18.1/docs)
-for the published behavior. `/en/latest/` follows development and can describe
-unreleased features. A matching wheel needs no local Java or Rust toolchain.
+Expect `4.19.0`. The API pins the matching `sparkless-native` distribution.
+Both server products depend on the lightweight `sparkless-connect` launcher.
+Their Connect extras install `pyspark-client==4.0.5`. The local API and
+standalone Connect setup run without Java. Install a compatible JDK for
+[local PySpark reference tests](TESTING_GUIDE.md#quick-start).
 
-## Published package components
+If you already use the local API, its `server`, `connect`, `server-duckdb`, and
+`connect-duckdb` extras add the corresponding server package. The server
+products also install independently of the local engine.
 
-| Component | PyPI distribution | Version |
-| --- | --- | --- |
-| Python API | [`sparkless`](https://pypi.org/project/sparkless/4.18.1/) | 4.18.1 |
-| Native engine | [`sparkless-native`](https://pypi.org/project/sparkless-native/4.18.0/) | 4.18.0 |
-| Optional HTTP/Connect server | [`sparkless-server-bin`](https://pypi.org/project/sparkless-server-bin/4.18.0/) | 4.18.0 |
+Continue with the [Python quickstart](python_getting_started.md),
+[pytest quickstart](TESTING_GUIDE.md#quick-start),
+[Connect quickstart](SPARK_CONNECT.md), or [HTTP quickstart](HTTP_API.md#start-and-query).
+See [release evidence](RELEASE_EVIDENCE.md) for public distribution links and
+[the migration guide](python_migration.md#from-sparkless-418-to-419) for removed
+4.18 imports. For an application staying on 4.18.1, use the
+[4.18.1 installation guide](https://github.com/eddiethedean/robin-sparkless/blob/v4.18.1/docs/INSTALLATION.md).
 
-Install the optional server with `python -m pip install "sparkless[server]==4.18.1"`.
-The exact engine and server pins are declared by the API package. The public
-inventories and hashes were checked by the successful [tagged Release run](https://github.com/eddiethedean/robin-sparkless/actions/runs/41170498256).
-
-## 4.19 candidate products
-
-The [4.19 candidate evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md)
-records successful split-product wheel and install checks for a specific
-commit. Public distribution is a separate release step.
-
-| Install | Product contents |
-| --- | --- |
-| `sparkless` | Local Python API with a dependency on the matching `sparkless-native` engine |
-| `sparkless-server` or `sparkless[server]` | Base Polars server; no DuckDB/Quack payload |
-| `sparkless-server[connect]` or `sparkless[connect]` | Base server plus pinned `pyspark-client==4.0.5` |
-| `sparkless-server-duckdb` or `sparkless[server-duckdb]` | Polars server, read-only DuckDB sources, matching Quack extension |
-| `sparkless-server-duckdb[connect]` or `sparkless[connect-duckdb]` | DuckDB server plus pinned Connect client |
-| `sparkless-connect[client]` | Remote Connect client and shared launcher; no server binary or local engine |
-| `sparkless-testing` or `sparkless[testing]` | Backend-independent test fixtures and comparison helpers |
-
-The server products use separate import names: `sparkless_server` and
-`sparkless_server_duckdb`. The shared launcher is `sparkless_connect`; 4.19
-removes the older `sparkless.server` and `sparkless-server-bin` forwarding APIs.
-Source users should select `sparkless_server_duckdb.SparklessServer` explicitly.
-The 4.19 DuckDB product executes transformations in Polars and reads configured
-tables from DuckDB. Follow the [DuckDB guide](DUCKDB_SOURCE.md) for a working example.
-Both server wheel sets currently target Linux x86_64 with glibc 2.28+ and macOS
-14+ ARM64. Product images are `ghcr.io/eddiethedean/sparkless-server` and
-`ghcr.io/eddiethedean/sparkless-server-duckdb`.
-
-### Try the 4.19 candidate
-
-Use a clean Python 3.11+ environment. Put the candidate wheels for your
-platform and the same build revision in a directory called `wheelhouse`.
-Include the companion packages from the same run, such as `sparkless-native`
-for the local API or `sparkless-connect` for either server.
-
-```bash
-python -m pip install --find-links ./wheelhouse "sparkless==4.19.0"
-```
-
-Choose the corresponding package from the table for a server or testing-only
-install. Keep version pins when testing against a local wheel directory.
-For a fully offline install, include third-party dependency wheels and add
-`--no-index`.
+For offline installs, collect matching product, companion, and third-party
+wheels in one directory and use `--no-index --find-links ./wheelhouse`. See
+[installation troubleshooting](TROUBLESHOOTING_PYTHON.md) if pip cannot find a
+compatible wheel.
 
 ## Platforms and build features
 
@@ -110,6 +92,5 @@ After canonical source setup, a SQLite/Postgres-enabled development extension:
 
 This retains default Delta and mandatory SQL. A database extra alone cannot
 change a downloaded wheel. See [JDBC tests](JDBC_TESTING.md) for external services.
-Rust consumers must read the [4.18 security notice](security/zstd-4.18-exception.md):
-the unpatched Cargo graph has a time-bounded zstd exception through **2026-11-26**;
-apply the pinned consumer patch. Repository/official distributions use the fixed graph.
+For Rust dependencies and historical compression exceptions, see the
+[security guide](SECURITY.md#known-dependency-exception).

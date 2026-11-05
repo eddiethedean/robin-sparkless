@@ -5,7 +5,7 @@ search:
 
 # Phase 4.19 implementation evidence
 
-This is an interim record for the [4.19 release plan](RELEASE_4_19.md), not a release acceptance report. The implementation branch is `codex/release-4.19`. The earliest exploratory runs used `HEAD` `1f43130c0f96c9641442953fbb941478069922d9`, a then-dirty source digest `c5174677078c1fe0683c6424cdb268d77eb0387c37aa4889e24b73f1c75b6451`, and a Connect server binary SHA-256 `e6c41781d633629904bc2966e35e0fc9487944d8b2522b1fa78b6a5cb8726278` (reported version `4.18.0`). Later controlled runs below record their exact clean source revisions and binary hashes. The early digest included `output/benchmarks`; those untracked benchmark workspace files are not part of this implementation change.
+This historical development record accompanies the [4.19 release plan](RELEASE_4_19.md). See [published 4.19.0 artifacts](../../RELEASE_EVIDENCE.md#4190-public-artifacts-2026-11-05-utc) for the public release. The implementation branch is `codex/release-4.19`. The earliest exploratory runs used `HEAD` `1f43130c0f96c9641442953fbb941478069922d9`, a then-dirty source digest `c5174677078c1fe0683c6424cdb268d77eb0387c37aa4889e24b73f1c75b6451`, and a Connect server binary SHA-256 `e6c41781d633629904bc2966e35e0fc9487944d8b2522b1fa78b6a5cb8726278` (reported version `4.18.0`). Later controlled runs below record their exact clean source revisions and binary hashes. The early digest included `output/benchmarks`; those untracked benchmark workspace files are not part of this implementation change.
 
 ## Product-separation scope revision (2026-11-02)
 

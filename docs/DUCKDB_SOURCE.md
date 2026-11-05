@@ -4,59 +4,55 @@ The optional `sparkless-server-duckdb` package exposes configured DuckDB
 tables over Spark Connect. Use it when your test data already lives in a
 DuckDB file and your test uses the PySpark client.
 
-!!! info "4.19 candidate feature"
+!!! info "Read-only source access"
 
     Sparkless opens DuckDB sources read-only. Write support is planned for a
     future release. Polars executes the supported DataFrame operations.
 
 ## Query a local DuckDB file
 
-Install the DuckDB server and the pinned PySpark Connect client from a
-[candidate wheel directory](INSTALLATION.md#try-the-419-candidate):
+Install the DuckDB server, its Connect client, and the DuckDB Python package
+used to create the example database.
 
 ```bash
-python -m pip install --find-links ./wheelhouse \
-  "sparkless-server-duckdb[connect]==4.19.0"
+python -m pip install "sparkless-server-duckdb[connect]==4.19.0" "duckdb==1.5.1"
 ```
 
-The example expects an `orders-fixture.duckdb` file with a `main.orders` table
-and two columns, an integer `amount` and a string `status`. If you already
-have a test database, substitute your file path, table name, and columns.
+Save as `query_orders.py` and run `python query_orders.py`. The example creates
+a temporary file and closes its writer before Sparkless opens the database.
 
-??? example "Create a tiny fixture"
+```python
+import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
-    In a Python environment with DuckDB installed, create the fixture once.
-    Close the connection before starting Sparkless.
+import duckdb
+from pyspark.sql import functions as F
+from sparkless_server_duckdb import SparklessConnect
 
-    ```python
-    import duckdb
-
-    with duckdb.connect("orders-fixture.duckdb") as db:
+with TemporaryDirectory() as directory:
+    database = Path(directory) / "orders.duckdb"
+    with duckdb.connect(str(database)) as db:
         db.execute("""
             CREATE TABLE orders AS
             SELECT * FROM (VALUES (120, 'paid'), (80, 'pending'), (110, 'paid'))
             AS t(amount, status)
         """)
-    ```
 
-```python
-import json
-from pathlib import Path
+    sources = [{"alias": "warehouse", "database_path": str(database)}]
+    options = {"env": {"SPARKLESS_DUCKDB_SOURCES": json.dumps(sources)}}
 
-from pyspark.sql import functions as F
-from sparkless_server_duckdb import SparklessConnect
-
-database = Path("orders-fixture.duckdb").resolve()
-sources = [{"alias": "warehouse", "database_path": str(database)}]
-server_options = {"env": {"SPARKLESS_DUCKDB_SOURCES": json.dumps(sources)}}
-
-with SparklessConnect(server_options=server_options) as spark:
-    orders = spark.table("warehouse.main.orders")
-    assert orders.filter("amount > 99").count() == 2
-    grouped = orders.groupBy("status").agg(F.count(F.lit(1)).alias("n"))
-    counts = {row.status: row.n for row in grouped.collect()}
-    assert counts == {"paid": 2, "pending": 1}
+    with SparklessConnect(server_options=options) as spark:
+        orders = spark.table("warehouse.main.orders")
+        assert orders.filter("amount > 99").count() == 2
+        grouped = orders.groupBy("status").agg(F.count(F.lit(1)).alias("n"))
+        counts = {row.status: row.n for row in grouped.collect()}
+        assert counts == {"paid": 2, "pending": 1}
+        print(sorted(counts.items()))
 ```
+
+Expect `[('paid', 2), ('pending', 1)]`. To use an existing fixture, remove the
+creation step and point `database` at its absolute path.
 
 The server maps the alias to the database file at startup. The PySpark client
 uses a name like `warehouse.main.orders` or `warehouse.orders`. Paths and
@@ -108,5 +104,5 @@ Each statement reads from one owner transaction. A commit by an independent
 writer becomes visible to the next statement. Cancelled scans interrupt the
 local client and send cancellation to the Quack owner. See the
 [deployment runbook](PRODUCTION.md) for the listener trust boundary and the
-[candidate evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md) for the
+[development evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md) for the
 standalone, shared-owner, and Spark differential checks.

@@ -10,19 +10,18 @@ this page select either local engine.
 
 ## Quick Start
 
-In the 4.19 candidate, `sparkless[testing]` installs `sparkless-testing`,
-which includes pytest as a dependency. Use a
-[candidate wheel directory](INSTALLATION.md#try-the-419-candidate).
+In 4.19, `sparkless[testing]` installs the local engine, the separate
+`sparkless-testing` package, and pytest.
 For 4.18, follow the [guide at the published tag](https://github.com/eddiethedean/robin-sparkless/blob/v4.18.1/docs/TESTING_GUIDE.md).
 
 ```bash
-python -m pip install --find-links ./wheelhouse "sparkless[testing]==4.19.0"
+python -m pip install "sparkless[testing]==4.19.0"
 ```
 
 For the PySpark run, use a separate environment and install
-`sparkless[testing,pyspark]==4.19.0` with the same wheel directory and a
+`sparkless[testing,pyspark]==4.19.0` with a
 compatible Java runtime. This selects PySpark 3.5. Use `testing,pyspark4`
-for PySpark 4. See [installation and extras](python_getting_started.md#optional-extras).
+for PySpark 4 with Java 17 and set `SPARKLESS_PYSPARK_COMPAT=4.0`. See [installation and extras](python_getting_started.md#optional-extras).
 
 ### 1. Add the pytest plugin to your `conftest.py`
 
@@ -35,7 +34,7 @@ Use the `.plugin` entry point to register both fixtures (`spark`, `spark_mode`,
 `spark_imports`, etc.) and marker/collection hooks. Loading only
 `"sparkless_testing"` exposes the fixtures but does not activate those hooks.
 
-### 2. Write a test using the `spark` fixture
+### 2. Save a test as `test_example.py`
 
 ```python
 def test_filter(spark):
@@ -51,14 +50,17 @@ def test_filter(spark):
 ### 3. Run tests
 
 ```bash
-# Run with sparkless (default, fast)
-pytest tests/
+# In the directory containing conftest.py and test_example.py
+SPARKLESS_TEST_MODE=sparkless python -m pytest test_example.py
 
-# Run with PySpark (validates parity)
-SPARKLESS_TEST_MODE=pyspark pytest tests/
+# In the separate PySpark environment
+SPARKLESS_TEST_MODE=pyspark python -m pytest test_example.py
 ```
 
 ---
+
+PowerShell users can set the backend with
+`$env:SPARKLESS_TEST_MODE = "pyspark"` before running pytest.
 
 ## Maintainer checks and CI
 
@@ -454,9 +456,7 @@ class TestMyTransform:
 
 ### GitHub Actions Example
 
-This example uses the 4.19 packages after public distribution. For candidate
-CI, supply the wheel directory from your build and use the
-[candidate install commands](#quick-start).
+This example installs the 4.19 packages from PyPI.
 
 ```yaml
 name: Tests
@@ -617,11 +617,10 @@ see [Spark Connect](SPARK_CONNECT.md).
 
 ### Import errors for sparkless_testing
 
-Install `sparkless-testing` in the same environment as pytest. For the 4.19
-candidate, point pip at your candidate wheel directory:
+Install `sparkless-testing` in the same environment as pytest:
 
 ```bash
-python -m pip install --find-links ./wheelhouse "sparkless-testing==4.19.0"
+python -m pip install "sparkless-testing==4.19.0"
 ```
 
 For repository development, use the [contributor setup](https://github.com/eddiethedean/robin-sparkless/blob/main/CONTRIBUTING.md#setup) and rebuild the native extension after Rust changes.

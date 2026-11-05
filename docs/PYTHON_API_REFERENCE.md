@@ -1,4 +1,4 @@
-# Python API contracts — 4.18.0
+# Python API contracts — 4.19.0
 
 This page covers the most-used installed local APIs. The generated
 [symbol/signature reference](PYTHON_API_SYMBOLS.md) inventories the public runtime

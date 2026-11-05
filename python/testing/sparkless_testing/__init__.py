@@ -11,7 +11,7 @@ Quick Start (for external projects):
 
 1. Add to your conftest.py:
 
-    pytest_plugins = ["sparkless_testing"]
+    pytest_plugins = ["sparkless_testing.plugin"]
 
 2. Use the `spark` fixture in your tests:
 

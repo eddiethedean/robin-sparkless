@@ -9,20 +9,6 @@ commit and do not satisfy this publication check.
 
 ## Prepare the release
 
-**4.19 release gate:** this branch now implements [SS-23's product/package
-migration](plans/sparkless-server/23-product-and-package-separation.md), including
-separate base and DuckDB server products, the shared launcher, a standalone
-`sparkless-testing` package, removal of the old server forwarding package, and
-both images. The release workflow builds distinct products and inventories.
-Native Linux/macOS builds, the split-product consumer matrix, and V59 must pass
-before tagging/publication; the public stage closes after publication. The exact
-4.19 product candidate checks passed on commit
-`f3e69dd785783a4318272996b8dc62fa9ead4ca3` in [release run
-41771863666](https://github.com/eddiethedean/robin-sparkless/actions/runs/41771863666).
-The release remains on hold for the other documented pre-publication gates and
-first uploads; fresh-public V59 checks remain after publication.
-Published 4.18 artifacts remain unchanged.
-
 The Rust local facade, engine, DuckDB source, server core, Polars server adapter,
 and product crates share the engine version. Python `sparkless` pins the local
 native engine and its optional testing package; the shared launcher and server

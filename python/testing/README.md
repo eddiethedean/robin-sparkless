@@ -6,7 +6,7 @@ application, or install `sparkless-testing` directly for a suite that selects it
 backend independently.
 
 ```python
-pytest_plugins = ["sparkless_testing"]
+pytest_plugins = ["sparkless_testing.plugin"]
 
 from sparkless_testing import get_imports
 ```

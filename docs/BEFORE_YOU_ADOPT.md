@@ -30,7 +30,7 @@ Sparkless is a strong fit for **local PySpark-style development and testing** wi
 
 The native server provides HTTP and a subset of the Spark 4.0.5 Connect
 protocol. The remote API supports fewer operations and logical types than
-the in-process Python API. The 4.19 candidate adds an optional server product
+the in-process Python API. 4.19 adds an optional server product
 for configured read-only DuckDB tables. See the
 [Connect limits](SPARK_CONNECT.md#limits-and-unsupported-operations) and
 [DuckDB source guide](DUCKDB_SOURCE.md).

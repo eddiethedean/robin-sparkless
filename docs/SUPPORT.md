@@ -3,10 +3,7 @@
 Sparkless is maintained as an open-source project on a best-effort basis.
 There is no published SLA, paid support commitment, or guaranteed security-fix
 backport schedule. Evaluate your required response and lifecycle guarantees
-before enterprise adoption. The published stable contract remains [4.18.1 API / 4.18.0
-native and server](INSTALLATION.md); the [4.19.0 candidate matrix](SUPPORT_MATRIX.md)
-describes only evidence retained on the release branch and does not change the
-published contract.
+before enterprise adoption. The current release is 4.19.0. See the [versioned support matrix](SUPPORT_MATRIX.md).
 
 Use [GitHub Issues](https://github.com/eddiethedean/robin-sparkless/issues) for bugs
 and feature requests. Include package/interpreter/OS/architecture versions,
@@ -16,8 +13,8 @@ For install failures include wheel filename/native module path and complete erro
 
 Maintainers prioritize reproducible failures against current releases and the
 reviewed development branch. Older releases may require upgrading before a fix
-can be assessed. No long-term support branch is promised. Version bounds in your
-application should reflect tested behavior, not a claim of universal PySpark parity.
+can be assessed. No long-term support branch is promised. Minor releases can change package, Python, or Rust interfaces. Pin a version you
+have tested and review migration notes before expanding your version range.
 
 Deprecations should be recorded in release notes with a replacement and removal
 version before removal when practical. Security fixes or correctness defects can

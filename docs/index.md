@@ -65,7 +65,7 @@ finally:
 
 </div>
 
-## In the 4.19 candidate
+## New in 4.19.0
 
 - **Own a server and a session together.** `SparklessConnect` starts the native
   server and creates a fresh PySpark Connect session in one `with` block.
@@ -75,7 +75,7 @@ finally:
   [Query a DuckDB file](DUCKDB_SOURCE.md)
 - **Install the components you use.** The base server, DuckDB server, shared
   launcher, and pytest helpers are separate packages.
-  [Compare the packages](INSTALLATION.md#419-candidate-products) ·
+  [Compare the packages](INSTALLATION.md#choose-a-package) ·
   [Upgrade from 4.18](python_migration.md#from-sparkless-418-to-419)
 
 ## What to check before adopting Sparkless

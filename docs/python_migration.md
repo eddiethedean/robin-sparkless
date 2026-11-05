@@ -45,9 +45,19 @@ PySpark validation run.
 into independently installed packages. Migrate imports and install extras with
 the package boundary:
 
+Start in a fresh environment and select one install path.
+
+| Your 4.18.1 workflow | 4.19.0 dependency | First thing to verify |
+| --- | --- | --- |
+| Local DataFrames | `sparkless==4.19.0` | Run a representative local pipeline with explicit schemas. |
+| Local pytest fixtures | `sparkless[testing]==4.19.0` | Switch the pytest plugin and run both backend modes if you use a reference Spark runtime. |
+| Base Connect server | `sparkless-server[connect]==4.19.0` | Update imports and check session startup and shutdown. |
+| Remote Connect endpoint | `sparkless-connect[client]==4.19.0` | Confirm the endpoint and client version before running tests. |
+| Rust embedding | `robin-sparkless = "=4.19.0"` | Apply the [Rust migration](MIGRATION_4_19.md) and rebuild downstream consumers. |
+
 | 4.18 | 4.19 |
 | --- | --- |
-| `from sparkless.server import SparklessServer` | `from sparkless_connect import SparklessServer` for the shared launcher, or `from sparkless_server import SparklessServer` for the base product |
+| `from sparkless import SparklessServer` or `from sparkless.server import SparklessServer` | `from sparkless_connect import SparklessServer` for the shared launcher, or `from sparkless_server import SparklessServer` for the base product |
 | `from sparkless.server import AsyncSparklessServer` | `from sparkless_connect import AsyncSparklessServer` or use the helper from your server product |
 | `import sparkless.testing` | `import sparkless_testing`. In `conftest.py`, register `pytest_plugins = ["sparkless_testing.plugin"]` to load fixtures and hooks. |
 | `pip install "sparkless[dev]"` for shared pytest helpers | `pip install "sparkless[testing]"` or `pip install sparkless-testing` |

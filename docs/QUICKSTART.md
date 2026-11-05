@@ -6,27 +6,26 @@ Python users should start with [the Python guide](python_getting_started.md).
 
 ## Install
 
-The 4.18.0 crates require Rust 1.93 or newer. Repository builds use the pinned
-[rust-toolchain.toml](https://github.com/eddiethedean/robin-sparkless/blob/main/rust-toolchain.toml).
+The 4.19.0 crates require Rust 1.93 or newer. The repository pins
+[Rust 1.93.1](https://github.com/eddiethedean/robin-sparkless/blob/v4.19.0/rust-toolchain.toml).
 
-Add the engine to your application's `Cargo.toml`:
+```bash
+cargo new sparkless-demo
+cd sparkless-demo
+cargo add robin-sparkless@=4.19.0
+```
+
+Or add the dependency to an existing application's `Cargo.toml`:
 
 ```toml
 [dependencies]
-robin-sparkless = "4"
+robin-sparkless = "=4.19.0"
 ```
-
-**4.18.0 compression security:** Cargo does not inherit a dependency's workspace
-patches. Ordinary crates.io builds retain zstd advisory exposure under a
-maintainer-approved exception that expires after 2026-11-26 UTC. Apply the
-[pinned consumer patch configuration](security/zstd-4.18-exception.md#apply-our-patch-in-a-rust-consumer)
-when handling untrusted compressed input. The linked notice explains the
-exposure, exact patches, lockfile update, and verification commands. Official
-Python/server wheels and repository builds use the fixed graph.
 
 ## Create and filter a DataFrame
 
-This example uses the Column API from `robin_sparkless::functions`:
+Save this as `src/main.rs` in your demo project and run `cargo run`. The output
+contains Bob and Charlie. This uses the Column API from `robin_sparkless::functions`.
 
 ```rust
 use robin_sparkless::SparkSession;
@@ -94,7 +93,7 @@ example:
 
 ```toml
 [dependencies]
-robin-sparkless = { version = "4", features = ["sql", "delta"] }
+robin-sparkless = { version = "=4.19.0", features = ["sql", "delta"] }
 ```
 
 | Feature | Capability |

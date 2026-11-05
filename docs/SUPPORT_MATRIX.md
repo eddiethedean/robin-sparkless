@@ -1,19 +1,10 @@
-# 4.19.0 candidate support contract
+# 4.19.0 support contract
 
-Reviewed against branch `codex/release-4.19` on 2026-11-02. **4.19.0 is an
-unpublished release candidate; this page describes only the behavior and
-platforms covered by the retained candidate evidence.** See [versions and
-installation](INSTALLATION.md).
+This page describes the published 4.19.0 products. See the [package and platform matrix](INSTALLATION.md) and [release evidence](RELEASE_EVIDENCE.md).
+
 “Implemented” describes a bounded API, not every Spark semantic or workload.
 “Behavior-tested” means linked regression/example coverage exists. “Unsupported”
 is outside the published contract; “unknown” requires workload validation.
-
-The branch contains separate local, base-server, and DuckDB-server package
-boundaries and a shared lightweight Python launcher. The
-[Phase 7 record](plans/solid-refactor-4.19.md#phase-7-implementation-record-2026-11-03)
-identifies the split-product revision that passed acceptance. The subsequent
-[review fixes](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#local-review-verification)
-have local regression coverage. Both 4.19 server products execute through Polars.
 
 | Capability | Local Python | Rust embedding | Base server | DuckDB server | Spark Connect |
 | --- | --- | --- | --- | --- | --- |
@@ -52,49 +43,11 @@ Evidence and narrower contracts:
   arbitrary Connect SQL are rejected or unsupported. See the
   [4.19 source contract](plans/sparkless-server/RELEASE_4_19.md#duckdb-source-contract)
   and [candidate evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md).
-- The retained local macOS wheel and public standalone/Quack source smokes
-  validate the **pre-separation** DuckDB-enabled candidate only. Exact split
-  product evidence is now recorded separately: [release workflow run
-  41771863666](https://github.com/eddiethedean/robin-sparkless/actions/runs/41771863666)
-  passed the Linux x86_64 and macOS arm64 product wheels, clean client/local/base/
-  DuckDB/coinstall profiles, source smokes, Spark differential checks, resource
-  probes, product images, and candidate inventory for commit
-  `f3e69dd785783a4318272996b8dc62fa9ead4ca3`. The [candidate evidence
-  record](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md) links the inventory
-  artifact and its hash; do not reuse historical wheel hashes for split
-  products. Runtime execution on an actual macOS 14 host remains open.
-- The earlier exact-commit
-  [release workflow run 41351811918](https://github.com/eddiethedean/robin-sparkless/actions/runs/41351811918)
-  passed installed Linux x86_64 and macOS arm64 server-extra source smokes and a
-  four-reader, 100k-row slow-consumer run on each platform. This is historical
-  context only for current implementation work. Every measured reader returned
-  all rows; observed server-child RSS was 192.9 MiB on Linux and 137.8 MiB on
-  macOS. These are single-run observations, not a hard or broad cross-platform
-  RSS guarantee. Retained raw reports and limits are in the
-  [4.19 resource evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#exact-commit-linux-and-macos-source-extra-resource-checks-2026-11-01).
-  A current packaged-wheel release build on macOS arm64 completed three
-  measured rounds of the 100k- and 350k-row four-reader slow-consumer cohorts;
-  all 24 measured reader actions completed with zero result-cap rejections and
-  peak server RSS of 136.6 MiB and 209.8 MiB respectively. See the
-  [current local reports](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#current-packaged-source-100k350k-slow-reader-rerun-2026-11-02).
-  Repeated current-source four-reader 1M-row macOS scans returned all rows at
-  active limits 1/2/4. Twenty measured actions per setting across three fresh
-  server processes peaked at 257.8/281.6/325.5 MiB, respectively, with zero
-  result-cap rejections. A provisional 384 MiB guardrail covers this specific
-  Mac workload; it is not enforced or portable. See the
-  [repeated 1M-row reports](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#repeated-current-source-one-million-row-slow-reader-runs-2026-11-01).
-  The exact current packaged candidate also completed one local 1M-row round
-  at active limits 1/2/4, with all twelve reader actions returning every row
-  and zero cap rejections; peak RSS was 257.4/290.1/320.8 MiB. These are
-  single-round macOS results, not portable RSS guarantees. See the
-  [current boundary reports](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#current-packaged-source-one-million-row-boundary-rerun-2026-11-02).
-  Current-source Linux x86_64 standalone smoke, generic `linux_x86_64` wheel
-  verifier, and one resource round pass under Docker emulation. These checks do
-  not certify the `manylinux_2_28_x86_64` wheel. Native Linux, Linux Quack, and
-  broader resource acceptance remain open.
-  A source-built server can load a trusted local extension path. Installed
-  wheels resolve the bundled extension beside the server executable when
-  `extension_path` is omitted, without a runtime download.
+- See [release evidence](RELEASE_EVIDENCE.md) for published packages and
+  [4.19 development evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md)
+  for the scope and revisions of cross-platform and resource measurements.
+  Installed DuckDB wheels resolve the bundled Quack extension beside the server
+  executable when `extension_path` is omitted.
 
 - [Generated compatibility inventory](PARITY_STATUS.md): counts and oracle provenance, not a parity percentage.
 - [Executable examples](https://github.com/eddiethedean/robin-sparkless/tree/main/examples/python): backend identity, pipeline, UDF.

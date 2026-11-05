@@ -15,6 +15,13 @@ Rust consumers should apply its exact immutable Cargo patch; the exception is
 risk acceptance, not remediation. The notice records scope, approval, evidence,
 and expiry. Review it before installing an unpatched Rust dependency.
 
+The [4.19.0 source lockfile](https://github.com/eddiethedean/robin-sparkless/blob/v4.19.0/Cargo.lock)
+resolves `zstd` 0.14.3 and `zstd-safe` 8.2.0. A Rust application resolves its own
+dependency graph. Review its `Cargo.lock` and audit results separately.
+See [release evidence](RELEASE_EVIDENCE.md) for per-file hashes and available
+PyPI provenance. For the DuckDB server, the installed package also includes
+the Quack extension and its notice.
+
 ## Reporting
 
 Start at the repository's [Security page](https://github.com/eddiethedean/robin-sparkless/security).

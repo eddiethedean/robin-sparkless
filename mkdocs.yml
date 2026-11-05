@@ -58,6 +58,8 @@ markdown_extensions:
   - attr_list
   - md_in_html
   - admonition
+  - pymdownx.tabbed:
+      alternate_style: true
   - pymdownx.details
   - pymdownx.superfences
   - pymdownx.highlight:
@@ -73,7 +75,7 @@ nav:
     - Before you adopt: BEFORE_YOU_ADOPT.md
     - Support matrix: SUPPORT_MATRIX.md
     - FAQ: FAQ.md
-  - Python guides:
+  - Develop and test locally:
     - Test with Sparkless and PySpark: TESTING_GUIDE.md
     - File pipeline tutorial: PIPELINE_TUTORIAL.md
     - Migration: python_migration.md
@@ -83,7 +85,8 @@ nav:
     - External catalogs: EXTERNAL_CATALOGS.md
     - Troubleshooting: TROUBLESHOOTING_PYTHON.md
   - Reference:
-    - Python API contracts: PYTHON_API_REFERENCE.md
+    - Local Python API: PYTHON_API_REFERENCE.md
+    - Testing helpers API: TESTING_PYTHON_API.md
     - Python symbols and signatures: PYTHON_API_SYMBOLS.md
     - Types and errors: TYPES_AND_ERRORS.md
     - Configuration: CONFIGURATION.md
@@ -96,17 +99,18 @@ nav:
   - Rust and extensions:
     - Quick start: QUICKSTART.md
     - User guide: USER_GUIDE.md
-    - Rust API fallback: RUST_API_REFERENCE.md
+    - Rust API reference: RUST_API_REFERENCE.md
     - Embedding: EMBEDDING.md
     - Extension author guide: EXTENDING.md
     - Product architecture: ARCHITECTURE.md
     - Engine architecture: ENGINE_ARCHITECTURE.md
     - Logical plan format: LOGICAL_PLAN_FORMAT.md
     - Database integration tests: JDBC_TESTING.md
-  - Servers:
+  - Run a server:
     - Spark Connect quickstart: SPARK_CONNECT.md
     - Read DuckDB tables: DUCKDB_SOURCE.md
-    - HTTP API: HTTP_API.md
+    - HTTP quickstart and API: HTTP_API.md
+    - Python launcher API: SERVER_PYTHON_API.md
     - Deployment and operations: PRODUCTION.md
     - Performance and sizing: PERFORMANCE.md
   - Project:

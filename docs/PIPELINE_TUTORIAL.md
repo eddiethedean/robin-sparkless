@@ -2,12 +2,12 @@
 
 Goal: read CSV orders, normalize types, discard refunds, join customer regions,
 aggregate revenue, and write Parquet. Budget: about ten minutes after installing
-Sparkless and pytest. No Java is needed for the Sparkless run.
+the Sparkless testing extra. No Java is needed for the Sparkless run.
 
 The complete executable source is
 [`test_pipeline_example.py`](https://github.com/eddiethedean/robin-sparkless/blob/main/examples/python/test_pipeline_example.py).
 Download it and [the plugin conftest](https://github.com/eddiethedean/robin-sparkless/blob/main/examples/python/conftest.py)
-into one directory, or use `examples/python` in a checkout. It creates input in a
+into one directory, or change into `examples/python` in a checkout. It creates input in a
 temporary directory and cleans up through pytest, so no sample dataset is needed.
 
 ## Transformation
@@ -33,8 +33,8 @@ application needs it. Null/invalid values need a separate rejection policy.
 ## Run and inspect
 
 ```bash
-python -m pip install pytest
-SPARKLESS_TEST_MODE=sparkless python -m pytest examples/python/test_pipeline_example.py -v
+python -m pip install "sparkless[testing]==4.19.0"
+SPARKLESS_TEST_MODE=sparkless python -m pytest test_pipeline_example.py -v
 ```
 
 Expected output after reading the written Parquet:
@@ -50,16 +50,19 @@ choose save modes deliberately for real data.
 
 ## Check real Spark
 
-In a separate environment with Java and `sparkless[pyspark]` installed:
+In a separate Python environment with Java 17, install the test plugin and
+the reference runtime. Run from the same example directory.
 
 ```bash
-SPARKLESS_TEST_MODE=pyspark python -m pytest examples/python/test_dual_mode_example.py examples/python/test_pipeline_example.py -v -s
+python -m pip install "sparkless[testing,pyspark]==4.19.0"
+SPARKLESS_TEST_MODE=pyspark python -m pytest test_pipeline_example.py -v
 ```
 
-The identity test asserts the actual session and imported SparkSession come from
-PySpark. Repeat with `sparkless[pyspark4]` and Java17 when Spark4 is your target.
-Both engines must pass the same transformation assertions. This small example
-is not a performance benchmark or certification of the rest of your workload.
+Expect one passing test in each environment. For Spark 4, use
+`sparkless[testing,pyspark4]==4.19.0` in another environment and set
+`SPARKLESS_PYSPARK_COMPAT=4.0` alongside `SPARKLESS_TEST_MODE=pyspark`.
+The separate [backend identity example](https://github.com/eddiethedean/robin-sparkless/blob/main/examples/python/test_dual_mode_example.py)
+can also verify that the reference session has a live JVM.
 
 Next: [API contracts](PYTHON_API_REFERENCE.md), [schema/errors](TYPES_AND_ERRORS.md),
 and [testing patterns](TESTING_GUIDE.md).

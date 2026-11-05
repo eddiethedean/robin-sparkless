@@ -1,4 +1,4 @@
-# HTTP statement API — 4.18.0
+# HTTP statement API — 4.19.0
 
 This is a bounded native SQL service, separate from the narrower Spark Connect
 plan API. Obtain the matching [server distribution](INSTALLATION.md) first.
@@ -7,16 +7,46 @@ authenticated TLS boundary. Session names and instance IDs are identities, not s
 
 ## Start and query
 
+Install the base server on a [supported platform](INSTALLATION.md#platforms-and-build-features).
+
 ```bash
-sparkless-server serve --host 127.0.0.1 --port 8099 --disable-connect
-curl --fail http://127.0.0.1:8099/health
-curl --fail http://127.0.0.1:8099/capabilities
-curl --fail http://127.0.0.1:8099/statements   -H 'Content-Type: application/json'   -d '{"session":"tutorial","kind":"sql","code":"SELECT 1 AS value"}'
+python -m pip install "sparkless-server==4.19.0"
 ```
 
-The owned [Python launcher](SPARK_CONNECT.md) selects ephemeral ports and stops/
-reaps the process through a context manager. Do not use its stdin control pipe
-as a statement transport.
+Save this as `http_query.py` and run `python http_query.py`. The wheel stores
+the native executable inside the package. The launcher starts it on an
+available loopback port, waits for readiness, and shuts it down on exit.
+
+```python
+import json
+from urllib.request import Request, urlopen
+
+from sparkless_server import SparklessServer
+
+with SparklessServer(connect_port=None) as server:
+    with urlopen(f"{server.http_url}/health", timeout=5) as response:
+        assert json.load(response)["status"] == "ready"
+
+    request = Request(
+        f"{server.http_url}/statements",
+        data=json.dumps({
+            "session": "tutorial",
+            "kind": "sql",
+            "code": "SELECT 1 AS value",
+        }).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urlopen(request, timeout=5) as response:
+        result = json.load(response)
+    assert result["status"] == "ok", result
+    rows = result["data"]["application/json"]["data"]
+    assert rows == [[1]], rows
+    print(rows)
+```
+
+Expect `[[1]]`. See the [launcher reference](SERVER_PYTHON_API.md) for process
+options and the [deployment runbook](PRODUCTION.md) for long lived servers.
 
 ## Routes
 

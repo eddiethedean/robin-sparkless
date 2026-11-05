@@ -64,32 +64,24 @@ or provide a redirect/signpost when renaming a current page.
 - At publication, change release status from candidate to published and link the
   immutable tag and release evidence. Do not assert publication ahead of the indexes.
 
-## Audit action-plan completion map
+## After publication
 
-| Priority | Implemented control |
-| ---: | --- |
-| 1 | Versioned per-surface support matrix and reconciled UDF/catalog claims |
-| 2 | Dual-mode example uses plugin fixtures and asserts actual backend identity |
-| 3 | Public installed-package imports, property forms and outside-checkout examples |
-| 4 | Diagnosed docs.rs dependency/nightly failure; pinned rustdoc fallback/artifact |
-| 5 | Current pytest parity/contributor walkthrough and fixture provenance |
-| 6 | Canonical contributor source setup linked from troubleshooting |
-| 7 | Stable/candidate install paths and site version/status banner |
-| 8 | Native feature/distribution matrix and explicit rebuild recipe |
-| 9 | Common API contracts plus generated public symbol/signature inventory |
-| 10 | Current consumer security notice at Rust install entries and policy pages |
-| 11 | Generated release compatibility inventory with honest support/evidence states |
-| 12 | Installed-wheel examples, two pinned real Spark oracles, config/static CI |
-| 13 | Repaired repo/site links and anchors; strict zero-warning site build |
-| 14 | Task-oriented navigation, promoted current guides, archive/search separation |
-| 15 | Executable CSV/type-normalize/join/aggregate/Parquet tutorial |
-| 16 | HTTP routes, schemas, errors, mutation identity and recovery reference |
-| 17 | Scoped operator runbook, support and security policies |
-| 18 | Configuration, types/schema/errors and cancellation references |
-| 19 | Reproducible sizing/performance guide, public metadata and evidence paths |
-| 20 | Ownership, review metadata, deprecation and release-doc checklist |
+1. Confirm the source tag and public PyPI and crates.io records. Link the
+   version-specific file lists and record any missing hosted artifacts in
+   [release evidence](RELEASE_EVIDENCE.md).
+2. Update `docs/reference/release.json` and use the public install commands.
+   The **Published documentation examples** workflow runs the local, pytest,
+   HTTP, Connect, and DuckDB guides in separate PyPI environments. Run it after
+   the publication update lands. The normal docs example job also checks the
+   built wheel and the two pinned PySpark reference runtimes.
+3. Verify the rendered [Read the Docs latest site](https://robin-sparkless.readthedocs.io/en/latest/)
+   shows the expected version and package instructions. Check the stable
+   version separately if the host exposes it. Source tags record the docs at
+   the cut. Fixes merged later appear in the main branch's manual after the
+   host rebuilds it.
+4. Open the versioned docs.rs API route and record its availability. Keep the
+   [pinned rustdoc build](RUST_API_REFERENCE.md) available for offline use.
 
-“Implemented control” is not a claim that every PySpark API has a complete
-handwritten contract or that all external hosting is repaired. The generated
-inventory marks missing runtime docstrings; unsupported/unknown combinations
-still require workload tests. CI results are reported separately for the exact commit.
+Keep historical plans in the archive, including the status and results as
+recorded at each checkpoint. Use the support matrix and release evidence for
+current product claims.

@@ -24,7 +24,7 @@ against Sparkless without Java. Running the testing plugin in
 
 ### Can Sparkless read my DuckDB test database?
 
-The 4.19 candidate can read configured tables through the optional
+Sparkless 4.19 can read configured tables through the optional
 `sparkless-server-duckdb` product. The server opens the database read-only,
 and tests access tables by name using the PySpark Connect client.
 See [read DuckDB tables](DUCKDB_SOURCE.md).
@@ -38,14 +38,14 @@ Sparkless exposes a **PySpark-compatible API** (`SparkSession`, `groupBy`, `spar
 ### How do I install Sparkless?
 
 ```bash
-pip install "sparkless>=4,<5"
+pip install "sparkless==4.19.0"
 ```
 
 See [Python getting started](python_getting_started.md) and [Troubleshooting (Python)](TROUBLESHOOTING_PYTHON.md).
 
 ### What Python versions are supported?
 
-Python **3.11+**. Prebuilt wheels are published for common Linux, macOS, and Windows platforms.
+The local engine publishes wheels for CPython **3.11–3.14**. The server has a smaller platform set. See the [wheel platform matrix](INSTALLATION.md#platforms-and-build-features).
 
 ### Sparkless 3 vs 4?
 

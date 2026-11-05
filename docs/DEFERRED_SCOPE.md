@@ -11,7 +11,7 @@ for that combination; it does not assert that an internal implementation cannot 
 | Python UDF variants | Local typed scalar UDF only in documented contexts; no public pandas/vectorized/grouped UDF or UDTF | Built-in expressions or real PySpark |
 | Remote Python execution | No HTTP/Connect Python worker or UDF contract | Local trusted-process code |
 | Catalog federation / WriterV2 | No full Hive/Spark metastore or writeTo contract | Documented local warehouse/external provider |
-| Connect general Spark surface | No SQL commands, joins, sorts/windows, general grouped agg, file sources, writes, artifacts or streaming | Published range/local/filter/project/limit/count subset or real Spark |
+| Connect general Spark surface | No SQL commands, general joins or aggregates, sorts/windows, file sources, writes, artifacts or streaming | Use the [Connect support contract](SPARK_CONNECT.md#supported-request-surface) for supported inner joins and grouped count/sum |
 | HTTP general SQL/IO | Bounded allowlist and in-memory catalog; no arbitrary filesystem/JDBC/Python execution | Local library or appropriate service |
 | Durable server recovery | No cross-restart catalog/operation journal or durable exactly-once guarantee | Application reconciliation and durable infrastructure |
 | Hard query isolation | No in-process hard CPU/intermediate-memory enforcement | Separate OS-limited processes |

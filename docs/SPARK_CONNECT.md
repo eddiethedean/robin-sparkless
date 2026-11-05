@@ -6,22 +6,19 @@ This setup needs no Java installation or Spark cluster.
 
 !!! info "Choose the guide for your version"
 
-    The examples below target the **4.19.0 candidate** and use a candidate
-    wheel directory. Sparkless shipped the server in 4.18. In that release,
+    The examples below use **4.19.0**. Sparkless shipped the server in 4.18. In that release,
     use `SparklessServer` and create the client session yourself. Follow the
     [published 4.18.1 Connect guide](https://github.com/eddiethedean/robin-sparkless/blob/v4.18.1/docs/SPARK_CONNECT.md)
     for the matching install and imports.
 
 ## Start a server and session
 
-Install the base server and the pinned `pyspark-client==4.0.5` dependency from
-a [candidate wheel directory](INSTALLATION.md#try-the-419-candidate).
+Install the base server and its pinned `pyspark-client==4.0.5` dependency from PyPI.
 Packaged server wheels target Linux x86_64 with glibc 2.28+ and macOS 14+
 on Apple Silicon.
 
 ```bash
-python -m pip install --find-links ./wheelhouse \
-  "sparkless-server[connect]==4.19.0"
+python -m pip install "sparkless-server[connect]==4.19.0"
 ```
 
 ```python
@@ -47,8 +44,7 @@ share a server. Start the server once outside the workers and give each worker
 the endpoint URL. Each worker creates and stops its own session.
 
 ```bash
-python -m pip install --find-links ./wheelhouse \
-  "sparkless-connect[client]==4.19.0"
+python -m pip install "sparkless-connect[client]==4.19.0"
 ```
 
 ```python
@@ -72,9 +68,30 @@ For a manually managed binary built with the `connect` Cargo feature, set
 address is `127.0.0.1:15002`. See the [deployment runbook](PRODUCTION.md) for
 network boundaries and readiness checks.
 
+## Share one server across pytest workers
+
+Copy [the example directory](https://github.com/eddiethedean/robin-sparkless/tree/main/examples/connect_xdist)
+including `pytest.ini`, `conftest.py`, and `test_orders.py`. Run these commands
+from that directory:
+
+```bash
+python -m pip install "sparkless-server[connect]==4.19.0" pytest pytest-xdist
+python -m pytest -n 2 test_orders.py
+```
+
+Expect two passing tests. The pytest controller starts one server and passes its
+URL to each worker through `workerinput`. Each worker creates its own Connect
+session and stops it at session teardown. Pytest then stops the controller's
+server. The same recipe also runs without `-n`.
+
+Worker sessions share server admission and resource budgets. Use distinct
+resource names for any shared state. The default active operation limit is two
+across the server, even when more workers connect. See the
+[launcher API](SERVER_PYTHON_API.md) for lifecycle and error handling.
+
 ## Supported request surface
 
-| Area | Supported in the 4.19 candidate |
+| Area | Supported in 4.19.0 |
 | --- | --- |
 | Relations | `SparkSession.range`, bounded inline scalar DataFrames with explicit schemas, and configured named DuckDB tables with the source-enabled server |
 | Transformations | Filter, projection, alias, limit, and supported inner joins |
@@ -109,13 +126,6 @@ Supported logical values are deliberately limited:
 Field labels, nullability, and supported metadata are preserved through the
 checked Arrow path. Empty results carry their schema.
 
-## Phase 4.19 branch additions (pre-release)
-
-4.19 adds the owned session helper, named DuckDB table relations, grouped
-aggregations, and joins within the [supported surface](#supported-request-surface).
-See [read DuckDB tables](DUCKDB_SOURCE.md) for source configuration, types, and
-per-statement limits.
-
 ## Limits and unsupported operations
 
 Connect plans share the server's process-wide execution admission with HTTP, plus bounded result
@@ -148,8 +158,8 @@ authenticated TLS boundary in front of it.
 
 ## Verification
 
-The [4.19 candidate evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md)
+The [4.19 development evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md)
 records the split-product wheel, clean-install, source smoke, and Spark
 4.0.5 differential checks. For earlier results see the
-[4.18 release evidence](RELEASE_EVIDENCE.md). The MiniLake proxy route requires
+[release evidence](RELEASE_EVIDENCE.md). The MiniLake proxy route requires
 separate validation of authentication, routing, and lifecycle behavior.

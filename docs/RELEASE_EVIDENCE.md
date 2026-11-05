@@ -1,4 +1,30 @@
-# Release evidence — 4.18 Python packaging recovery
+# Release evidence
+
+## 4.19.0 public artifacts — 2026-11-05 UTC
+
+Source tag [v4.19.0](https://github.com/eddiethedean/robin-sparkless/tree/v4.19.0)
+identifies commit [43b0fbff](https://github.com/eddiethedean/robin-sparkless/commit/43b0fbff3c1b19e67774be5230d4c059ea1c3cb0).
+
+| Distribution | Files in the public index |
+| --- | --- |
+| [sparkless](https://pypi.org/project/sparkless/4.19.0/#files) | API wheel and source archive |
+| [sparkless-native](https://pypi.org/project/sparkless-native/4.19.0/#files) | Eight native wheels and source archive |
+| [sparkless-connect](https://pypi.org/project/sparkless-connect/4.19.0/#files) | Launcher wheel and source archive |
+| [sparkless-testing](https://pypi.org/project/sparkless-testing/4.19.0/#files) | Testing wheel and source archive |
+| [sparkless-server](https://pypi.org/project/sparkless-server/4.19.0/#files) | Linux x86_64 and macOS arm64 wheels |
+| [sparkless-server-duckdb](https://pypi.org/project/sparkless-server-duckdb/4.19.0/#files) | Linux x86_64 and macOS arm64 wheels |
+| [robin-sparkless](https://crates.io/crates/robin-sparkless/4.19.0) | Rust facade crate |
+| [spark-sql-parser](https://crates.io/crates/spark-sql-parser/4.19.0), [robin-sparkless-core](https://crates.io/crates/robin-sparkless-core/4.19.0), [robin-sparkless-polars](https://crates.io/crates/robin-sparkless-polars/4.19.0), [robin-sparkless-duckdb](https://crates.io/crates/robin-sparkless-duckdb/4.19.0) | Parser, engine contracts, Polars backend, and DuckDB source crates |
+| [robin-sparkless-plan](https://crates.io/crates/robin-sparkless-plan/4.19.0), [robin-sparkless-sql](https://crates.io/crates/robin-sparkless-sql/4.19.0), [robin-sparkless-delta](https://crates.io/crates/robin-sparkless-delta/4.19.0), [robin-sparkless-jdbc](https://crates.io/crates/robin-sparkless-jdbc/4.19.0), [robin-sparkless-jdbc-polars](https://crates.io/crates/robin-sparkless-jdbc-polars/4.19.0) | Plan, SQL, Delta, and JDBC crates |
+| [sparkless-server](https://crates.io/crates/sparkless-server/4.19.0), [sparkless-server-duckdb](https://crates.io/crates/sparkless-server-duckdb/4.19.0) | Rust server products |
+| [sparkless-server-core](https://crates.io/crates/sparkless-server-core/4.19.0), [sparkless-server-runtime](https://crates.io/crates/sparkless-server-runtime/4.19.0), [sparkless-server-http](https://crates.io/crates/sparkless-server-http/4.19.0), [sparkless-server-connect](https://crates.io/crates/sparkless-server-connect/4.19.0), [sparkless-server-polars](https://crates.io/crates/sparkless-server-polars/4.19.0) | Server contracts, runtime, transports, and adapter crates |
+
+The PyPI file pages show checksums and per-file provenance when available. The
+[development evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md) records
+build, differential, and resource results for the exact revisions listed
+there. Use the [support matrix](SUPPORT_MATRIX.md) to interpret that coverage.
+The [Rust API guide](RUST_API_REFERENCE.md) gives a version-pinned local
+documentation command while the 4.19.0 docs.rs API page is unavailable.
 
 ## 4.18.1 publication outcome — 2026-10-31
 

@@ -29,6 +29,23 @@ contains engine-neutral schemas/errors/expressions/provider contracts, the Polar
 crate implements them, and the root facade exposes the Rust API. See
 [engine layering](ENGINE_ARCHITECTURE.md) for module and dependency details.
 
+## Follow a Connect query
+
+1. In `spark.range(10).filter("id > 5").count()`, PySpark serializes the range,
+   filter, and count as a Spark Connect plan. The count triggers execution.
+2. The Connect transport receives the gRPC request and the server coordinates
+   admission, the session, and operation tracking.
+3. The Polars adapter validates and translates the supported relation tree. The
+   engine executes it and returns a logical schema and Arrow IPC batches.
+4. The transport streams those batches to PySpark, which decodes the count.
+
+A new remote expression starts in the Polars Connect adapter's
+[`connect/plan.rs`](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/sparkless-server-polars/src/connect/plan.rs).
+Define how it binds column references and reports invalid or unsupported input.
+Cover schema analysis and execution with the same expression, then compare its
+output with Spark 4.0.5 through the public client. See [extension paths](EXTENDING.md)
+for local API and catalog changes.
+
 ## State and lifetime
 
 Local sessions own temporary views and configuration. Process-global views and

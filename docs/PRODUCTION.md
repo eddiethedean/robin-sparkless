@@ -30,7 +30,7 @@ These are defense-in-depth controls, not an OS sandbox.
    budgets using [configuration](CONFIGURATION.md) and [sizing](PERFORMANCE.md).
 3. Start with explicit bind addresses; query `/health` until ready and record
    `/capabilities`, instance ID, limits, executable version and deployment commit.
-4. Run a SELECT1 witness and a supported Connect witness if that listener is used.
+4. Run a `SELECT 1` witness and a supported Connect witness if that listener is used.
 5. Admit clients only after readiness. A launcher `ready` record is emitted after
    listener binding and a native witness; process existence alone is insufficient.
 
@@ -40,6 +40,36 @@ client records (instance/session/operation IDs, duration, result/error category)
 Avoid logging credentials or complete sensitive SQL/input data. There is no
 promised Prometheus endpoint or distributed tracing contract; measure process
 RSS/CPU, health failures, latency, timeouts and queue saturation externally.
+
+## Start an installed HTTP server
+
+Use this loopback smoke on a supported server-wheel platform. In one terminal,
+with the virtual environment active:
+
+```bash
+python -m pip install "sparkless-server==4.19.0"
+server_bin="$(python -c 'from sparkless_server import executable_path; print(executable_path())')"
+"$server_bin" --version
+"$server_bin" serve --host 127.0.0.1 --port 8099 --disable-connect
+```
+
+In a second terminal, download
+[verify_server_http.py](https://github.com/eddiethedean/robin-sparkless/blob/main/scripts/verify_server_http.py)
+into the current directory and run:
+
+```bash
+python verify_server_http.py http://127.0.0.1:8099 --mutations
+```
+
+The verifier creates temporary test data in the running instance, checks the
+mutation receipt, and verifies that replay preserves the original result.
+Expect `server health and HTTP SQL smoke passed`. Stop the process with Ctrl+C,
+then restart it and repeat the health and SQL smoke. The instance ID changes
+after restart. Reload your service data before admitting clients.
+
+Use the [release artifact list](RELEASE_EVIDENCE.md) to record versions and
+checksums for a deployment. For applications that own the process in Python,
+see the [launcher reference](SERVER_PYTHON_API.md).
 
 ## Capacity and overload
 

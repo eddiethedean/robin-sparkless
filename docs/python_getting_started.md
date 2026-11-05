@@ -13,7 +13,7 @@ This guide is for the **Sparkless v4** Python package: a PySpark-like API backed
 ### From PyPI (recommended)
 
 ```bash
-python -m pip install "sparkless>=4,<5"
+python -m pip install "sparkless==4.19.0"
 ```
 
 Requires **Python 3.11+**. Local execution uses a native extension and needs
@@ -21,23 +21,14 @@ neither Java, PySpark, nor the Polars Python package.
 
 ### Supported platforms
 
-The release workflow builds `cp311-abi3` extension wheels for Python 3.11–3.14:
-
-| Platform | Architectures |
-| --- | --- |
-| Linux, glibc or musl | x86_64, ARM64 |
-| macOS | Intel, Apple Silicon |
-| Windows | x86_64, ARM64 |
-
-Check the [native engine file inventory](https://pypi.org/project/sparkless-native/#files)
-for your release. A platform without a matching wheel requires a source build.
-The optional native server has a smaller platform set: Linux x86_64 with glibc
-2.28+ and macOS 14+ on Apple Silicon. See [Spark Connect](SPARK_CONNECT.md).
+Local engine wheels cover CPython 3.11–3.14 on Linux, macOS, and Windows.
+The optional server targets Linux x86_64 with glibc 2.28+ and macOS 14+ on
+Apple Silicon. See the [platform and build matrix](INSTALLATION.md#platforms-and-build-features)
+for architectures, libc, and feature details.
 
 ### Optional extras
 
-The table describes the **4.19 candidate**. For the published 4.18
-packages and their install commands, see [installation and versions](INSTALLATION.md).
+The table describes 4.19.0. See [installation and versions](INSTALLATION.md) for package names and platform requirements.
 
 | Extra | Dependencies and purpose |
 | --- | --- |
@@ -55,7 +46,7 @@ packages and their install commands, see [installation and versions](INSTALLATIO
 For example:
 
 ```bash
-python -m pip install --find-links ./wheelhouse "sparkless[testing]==4.19.0"
+python -m pip install "sparkless[testing]==4.19.0"
 ```
 
 Use separate environments for `pyspark` and `pyspark4`; they require different

@@ -6,8 +6,6 @@
 	test-parity-phase-e test-parity-phase-f test-parity-phase-g test-parity-phases \
 	sparkless-parity all bench-window
 
-# Use stable toolchain when no default is configured (override with RUSTUP_TOOLCHAIN=nightly etc.)
-export RUSTUP_TOOLCHAIN ?= stable
 # Use real Cargo home to avoid sandbox cache corruption (e.g. Cursor IDE).
 # Force override (:=) so Cursor/sandbox CARGO_HOME does not take precedence.
 export CARGO_HOME := $(HOME)/.cargo
@@ -34,10 +32,8 @@ test-rust-all-features:
 # Run all tests (Rust only)
 test: test-rust
 
-# Run all Rust checks. Clean first so old binaries don't accumulate (each run is a full rebuild).
-# Then run fmt-check, audit, deny, and clippy in parallel (they are independent); then tests
-# (tests reuse clippy's build). Use -j4 to overlap the four jobs.
-check: clean
+# Run independent Rust checks in parallel, then reuse the build cache for tests.
+check:
 	@$(MAKE) -j4 fmt-check audit deny clippy
 	$(MAKE) test-rust-all-features
 	@echo "All checks passed"

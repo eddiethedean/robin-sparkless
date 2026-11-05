@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Load a CSV through Spark Connect, query it, and export the returned rows.
 
-Requires Sparkless 4.18 with a Connect-enabled server and pyspark-client==4.0.5.
+Install sparkless-server[connect]==4.19.0.
 CSV parsing and JSON export happen in Python; DataFrame queries run on the server.
 """
 
@@ -10,9 +10,9 @@ import csv
 import json
 from pathlib import Path
 
-from pyspark.sql.connect.session import SparkSession
+from pyspark.sql import SparkSession
 from pyspark.sql.functions import col
-from sparkless import SparklessServer
+from sparkless_server import SparklessServer
 
 
 def main() -> None:
@@ -44,7 +44,7 @@ def main() -> None:
     print(f"Read {len(rows)} orders from {csv_path.name}")
 
     with SparklessServer(executable_path=args.server_bin) as server:
-        spark = SparkSession.builder.remote(server.spark_connect_url).getOrCreate()
+        spark = SparkSession.builder.remote(server.spark_connect_url).create()
         try:
             # The Connect client sends these typed rows as Arrow IPC.
             orders = spark.createDataFrame(

@@ -64,6 +64,6 @@ command when adding or regenerating evidence. Never regenerate expected output
 using Sparkless itself.
 
 Run focused tests while iterating, then the required CI lanes. `make check-full`
-does not replace Python pytest; `make check` also cleans Cargo artifacts. See
+covers Rust and Python linting. Run pytest separately. See
 [Contributing](https://github.com/eddiethedean/robin-sparkless/blob/main/CONTRIBUTING.md)
 and [documentation maintenance](DOCUMENTATION.md).

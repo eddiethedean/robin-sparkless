@@ -10,6 +10,33 @@ Thank you for contributing. This repository contains the **Sparkless** Python pa
 | **Rust engine** | [docs/QUICKSTART.md](docs/QUICKSTART.md), crate READMEs in `crates/` |
 | **Documentation** | [docs/](docs/), build with `mkdocs serve` (see [docs/requirements.txt](docs/requirements.txt)) |
 
+## Documentation only
+
+From the repository root, install the MkDocs dependencies with uv and run the
+site checks. This path needs Python 3.11 and uv.
+
+```bash
+uv run --no-project --python 3.11 --with-requirements docs/requirements.txt python scripts/check_documentation.py
+uv run --no-project --python 3.11 --with-requirements docs/requirements.txt mkdocs build --strict
+uv run --no-project --python 3.11 --with-requirements docs/requirements.txt mkdocs serve
+```
+
+Open `http://127.0.0.1:8000/` to preview. Follow the
+[docs maintenance guide](docs/DOCUMENTATION.md) for version and example updates.
+
+## Rust only
+
+Install Rust through rustup and run from the checkout so it picks up
+`rust-toolchain.toml`. Start with formatting and the crate you changed.
+
+```bash
+cargo fmt --all -- --check
+cargo test --locked -p robin-sparkless-core
+```
+
+Replace `robin-sparkless-core` with the relevant workspace crate. Add the
+features your change needs. The Python setup below is for Python or PyO3 work.
+
 ## Prerequisites
 
 - **Rust** — pinned in [rust-toolchain.toml](rust-toolchain.toml) (currently 1.93.x)
@@ -29,7 +56,7 @@ uv venv --python 3.11 .venv
 
 # Install contributor tools before building the native engine
 uv pip install --python .venv/bin/python "maturin>=1.4,<2"
-uv pip install --python .venv/bin/python pytest pandas pytest-xdist hypothesis pytest-timeout polars pyarrow
+uv pip install --python .venv/bin/python pytest pandas pytest-xdist hypothesis pytest-timeout polars pyarrow ruff mypy
 
 # Build the engine, then install the Python API with editable sources
 (
@@ -37,7 +64,7 @@ uv pip install --python .venv/bin/python pytest pandas pytest-xdist hypothesis p
   uv run --no-project --python ../../.venv/bin/python \
     python -m maturin develop --uv --locked --release
 )
-uv pip install --python .venv/bin/python --no-deps -e 'python[dev]'
+uv pip install --python .venv/bin/python --no-deps -e python
 uv pip install --python .venv/bin/python --no-deps -e python/testing
 ```
 
@@ -69,14 +96,18 @@ to `uv pip install` to avoid the hardlink fallback warning.
 
 ## Checks before opening a PR
 
-Run Rust checks/tests and Python lint/type checks:
+Choose the smallest check for your change. For the complete local Rust and
+Python lint pass, install the same Cargo security tools as CI:
 
 ```bash
+cargo install cargo-audit --locked --version 0.22.1
+cargo install cargo-deny --locked --version 0.19.0
 make check-full
 ```
 
 This runs: `cargo fmt`, Clippy, audit, deny, Rust tests (all features), Ruff, and mypy.
-Run Python tests separately using the commands below. First builds can take
+Run Python tests separately using the commands below. Use `make clean` when you need
+to reclaim Cargo build space. First builds can take
 substantial time; the duration depends on the selected features and host.
 
 Faster subsets:

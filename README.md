@@ -16,7 +16,7 @@ starting a Spark cluster.
 Requires **Python 3.11+**:
 
 ```bash
-python -m pip install "sparkless>=4,<5"
+python -m pip install "sparkless==4.19.0"
 ```
 
 ```python
@@ -43,15 +43,11 @@ It runs on one machine and implements a subset of PySpark behavior. Read
 | [Python API](docs/PYTHON_API_REFERENCE.md) | DataFrames, functions, SQL, and Arrow export |
 | [Testing](docs/TESTING_GUIDE.md) | One test suite with Sparkless and PySpark |
 | [Spark Connect server](docs/SPARK_CONNECT.md) | Run the real PySpark client against a native Sparkless server |
-| [DuckDB table sources](docs/DUCKDB_SOURCE.md) | Read a local DuckDB test database in the 4.19 candidate |
+| [DuckDB table sources](docs/DUCKDB_SOURCE.md) | Read a local DuckDB test database through Spark Connect |
 | [4.19 migration](docs/python_migration.md#from-sparkless-418-to-419) | Choose the new packages and update your imports |
 | [Rust quickstart](docs/QUICKSTART.md) | Embed the `robin-sparkless` engine |
 
-Full documentation: [Read the Docs](https://robin-sparkless.readthedocs.io/).
-
-**Rust 4.18.0 security note:** ordinary crates.io consumers need the
-[pinned compression patches](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/security/zstd-4.18-exception.md)
-for untrusted compressed input. The temporary advisory exception expires 2026-11-26.
+Full documentation: [Read the Docs](https://robin-sparkless.readthedocs.io/en/latest/).
 
 ## Contribute
 

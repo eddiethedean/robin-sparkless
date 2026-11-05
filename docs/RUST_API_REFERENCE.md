@@ -1,27 +1,19 @@
-# Rust API reference fallback — 4.18.0
+# Rust API reference — 4.19.0
 
-The published **4.17.0 docs.rs build failed**: Polars 0.53 imports
-`core::unicode::Cased` and `Case_Ignorable`, which the docs.rs nightly compiler
-no longer exposes in that form. See the [build log](https://docs.rs/crate/robin-sparkless/4.17.0/builds/5050245).
-This is a dependency/compiler incompatibility, not evidence that API docs were
-successfully published. Previously published crate metadata cannot be changed.
-
-Use this working source reference and generate full rustdoc with the repository's
-pinned **Rust 1.93.1**, rather than relying on that failed nightly build:
+Build full rustdoc from the published source tag using the pinned toolchain.
+This works independently of hosted build or artifact retention.
 
 ```bash
-git clone https://github.com/eddiethedean/robin-sparkless.git
+git clone --branch v4.19.0 --depth 1 https://github.com/eddiethedean/robin-sparkless.git
 cd robin-sparkless
-# Check out your exact release tag or reviewed candidate commit first.
 cargo doc --locked -p robin-sparkless --features sql --no-deps --open
 ```
 
-The docs CI job runs this command without `--open` and retains a `rust-api-docs`
-artifact; extract it and open `robin_sparkless/index.html`. Artifacts are scoped
-to the run's commit, and are subject to GitHub retention. For published 4.17 source,
-use the [immutable version tree](https://github.com/eddiethedean/robin-sparkless/tree/v4.17.0/src).
-For 4.18 candidate source, inspect the commit shown by the downloaded workflow run.
-The local cargo doc route is the fallback even after artifacts expire.
+The entry page is `target/doc/robin_sparkless/index.html`. CI also retains a
+`rust-api-docs` artifact for the commit it built. The
+[4.19.0 docs.rs API route](https://docs.rs/robin-sparkless/4.19.0/robin_sparkless/)
+was unavailable at review. The [source tag](https://github.com/eddiethedean/robin-sparkless/tree/v4.19.0)
+and [crate listing](https://crates.io/crates/robin-sparkless/4.19.0) identify the release.
 
 ## Choose your API
 
@@ -37,10 +29,5 @@ The local cargo doc route is the fallback even after artifacts expire.
 
 Start with the complete [quickstart](QUICKSTART.md). Feature flags are part of
 the API contract: SQL, Delta, and database drivers are opt-in for Rust consumers.
-Read the [consumer zstd notice](security/zstd-4.18-exception.md) before resolving
-an unpatched crates.io graph. Documentation build success does not prove the
-consumer security graph is patched.
-
-At release review, verify the actual versioned docs.rs API page. If it still
-fails, retain this explicit fallback and record the failure in release evidence;
-do not mark public docs.rs healthy merely because Cargo publication succeeded.
+See the [security guide](SECURITY.md#known-dependency-exception) for the scope of
+historical dependency exceptions and the lockfile used by 4.19.0.

@@ -3,7 +3,7 @@
 Runnable examples for the **Sparkless** Python package. Install first:
 
 ```bash
-pip install "sparkless>=4,<5"
+pip install "sparkless==4.19.0"
 ```
 
 | Script | Description |
@@ -21,13 +21,14 @@ Run scripts:
 ```bash
 python examples/python/basic_usage.py
 python examples/python/sql_and_temp_views.py
-pytest examples/python/test_dual_mode_example.py -v
+python -m pip install "sparkless[testing]==4.19.0"
+python -m pytest examples/python/test_dual_mode_example.py -v
 ```
 
-The Connect example requires the **4.18 candidate** Python package, a matching
-Connect-enabled native server, and `pyspark-client==4.0.5`. With those installed:
+Install the base server and its matching Connect client:
 
 ```bash
+python -m pip install "sparkless-server[connect]==4.19.0"
 python examples/python/connect_load_query.py --output-dir /tmp/sparkless-connect-output
 ```
 
@@ -37,7 +38,7 @@ it in Python, sends explicitly typed rows through Connect, runs filter, projecti
 and count queries on the native server, and exports the collected results to
 `high_value_orders.json`. It verifies exact results and closes both the session
 and server. CSV parsing, sorting the returned rows, and JSON export happen in the
-client because file readers, SQL, joins, and writes are outside this Connect subset.
+client because the Connect server does not expose file readers or writes.
 
 See [docs/python_getting_started.md](../../docs/python_getting_started.md) and [docs/TESTING_GUIDE.md](../../docs/TESTING_GUIDE.md).
 
@@ -45,10 +46,11 @@ Use the adjacent `conftest.py` to activate `sparkless_testing.plugin`. To check
 all pytest examples on real Spark (Java and the appropriate extra required):
 
 ```bash
+python -m pip install "sparkless[testing,pyspark]==4.19.0"
 SPARKLESS_TEST_MODE=pyspark python -m pytest examples/python -v -s
 ```
 
 The identity test unwraps the plugin's JDBC session adapter and verifies the
 actual PySpark session plus a live JVM witness. See the
 [pipeline tutorial](../../docs/PIPELINE_TUTORIAL.md) and
-[candidate install instructions](../../docs/INSTALLATION.md).
+[package install instructions](../../docs/INSTALLATION.md).
