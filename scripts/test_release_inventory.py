@@ -127,6 +127,40 @@ class ReleaseInventoryTests(unittest.TestCase):
             ):
                 verify_published_inputs(manifest, directory, ["sparkless-connect"])
 
+    def test_publisher_ignores_pypi_publish_attestation_sidecars(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            directory = root / "dist"
+            directory.mkdir()
+            payload = b"candidate wheel bytes"
+            filename = "sparkless_connect-4.19.0-py3-none-any.whl"
+            (directory / filename).write_bytes(payload)
+            (directory / f"{filename}.publish.attestation").write_text(
+                "PyPI publish attestation", encoding="utf-8"
+            )
+            manifest = root / "candidate-inventory.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "source_revision": "a" * 40,
+                        "distributions": {
+                            "sparkless-connect": {
+                                "files": [
+                                    {
+                                        "name": filename,
+                                        "size_bytes": len(payload),
+                                        "sha256": hashlib.sha256(payload).hexdigest(),
+                                    }
+                                ]
+                            }
+                        },
+                    }
+                )
+            )
+
+            verify_published_inputs(manifest, directory, ["sparkless-connect"])
+
     def test_publisher_rejects_missing_or_extra_files(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
