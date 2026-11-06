@@ -64,10 +64,11 @@ The final DuckDB server binary SHA-256 is
   query, confirmed the owner had no active query left, and recorded clean exits
   for both server and owner ([report](evidence/phase-420-duckdb-backend-shutdown-local.json)).
 
-CI was not used. Exact 4.20.0 inventory and install checks, Linux and container
-coverage, the supported capacity/resource envelope, cross-platform and other
-partial-I/O recovery, full multi-operation cleanup, and public release
-validation remain open.
+Main-branch CI validates this source candidate but does not close the release
+gates. Exact 4.20.0 inventory and install checks, Linux and container coverage,
+the supported capacity/resource envelope, cross-platform and other partial-I/O
+recovery, full multi-operation cleanup, and public release validation remain
+open.
 
 ## Historical 4.17 readiness review (2026-10-27)
 

@@ -27,6 +27,9 @@ ignore = [
     # Transitive via polars -> object_store -> quick-xml 0.39; needs object_store/polars bump to >=0.41.
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
+    # pin-utils is pulled transitively by futures-util across the graph. RustSec marks it
+    # unmaintained; there is no safe upgrade for the current dependency graph.
+    "RUSTSEC-2026-0441",
 ]
 # Don't warn when ignored advisories aren't in the graph (e.g. when delta feature is off)
 unused-ignored-advisory = "allow"
