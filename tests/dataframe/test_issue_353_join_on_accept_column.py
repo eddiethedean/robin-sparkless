@@ -19,9 +19,9 @@ def test_join_on_column(spark) -> None:
     right = spark.createDataFrame([{"id": 1, "w": 20}], ["id", "w"])
     # Use qualified columns to avoid ambiguous reference (left.id == right.id)
     result = left.join(right, left["id"] == right["id"]).collect()
-    assert [tuple(row.values()) if hasattr(row, "values") else tuple(row) for row in result] == [
-        (1, 10, 1, 20)
-    ]
+    assert [
+        tuple(row.values()) if hasattr(row, "values") else tuple(row) for row in result
+    ] == [(1, 10, 1, 20)]
 
 
 def test_join_on_list_of_columns(spark) -> None:
@@ -32,9 +32,9 @@ def test_join_on_list_of_columns(spark) -> None:
     result = left.join(
         right, (left["a"] == right["a"]) & (left["b"] == right["b"])
     ).collect()
-    assert [tuple(row.values()) if hasattr(row, "values") else tuple(row) for row in result] == [
-        (1, 2, 10, 1, 2, 20)
-    ]
+    assert [
+        tuple(row.values()) if hasattr(row, "values") else tuple(row) for row in result
+    ] == [(1, 2, 10, 1, 2, 20)]
 
 
 def test_join_on_str_still_works(spark) -> None:

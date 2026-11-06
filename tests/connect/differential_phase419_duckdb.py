@@ -332,7 +332,9 @@ def main() -> None:
                     ]
                 ),
             )
-            reference_integer_extrema.createOrReplaceTempView("integer_boundary_events_ref")
+            reference_integer_extrema.createOrReplaceTempView(
+                "integer_boundary_events_ref"
+            )
             reference_decimals = reference.createDataFrame(
                 [
                     (
@@ -571,9 +573,7 @@ def main() -> None:
                         "ALTER TABLE schema_change_events "
                         "ALTER COLUMN id SET DATA TYPE BIGINT"
                     )
-                    writer.execute(
-                        "UPDATE schema_change_events SET id = 2147483648"
-                    )
+                    writer.execute("UPDATE schema_change_events SET id = 2147483648")
                 finally:
                     writer.close()
                 try:

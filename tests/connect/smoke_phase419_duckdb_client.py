@@ -58,7 +58,9 @@ def run_source_replay_smoke(server_bin: Path) -> None:
         server.start()
         upstream = urlsplit(server.spark_connect_url)
         if upstream.hostname is None or upstream.port is None:
-            raise RuntimeError(f"invalid Spark Connect endpoint: {server.spark_connect_url}")
+            raise RuntimeError(
+                f"invalid Spark Connect endpoint: {server.spark_connect_url}"
+            )
         proxy = subprocess.Popen(
             [
                 sys.executable,
@@ -81,7 +83,9 @@ def run_source_replay_smoke(server_bin: Path) -> None:
                 raise TimeoutError("source replay fault proxy did not become ready")
             proxy_ready = proxy.stdout.readline().strip()
         if proxy_ready != f"fault_proxy ready address=127.0.0.1:{proxy_port}":
-            raise RuntimeError(f"source replay fault proxy exited early: {proxy_ready!r}")
+            raise RuntimeError(
+                f"source replay fault proxy exited early: {proxy_ready!r}"
+            )
 
         producer_pattern = r"event=producer_started"
         reattach_pattern = r"event=rpc method=ReattachExecute"
@@ -89,7 +93,9 @@ def run_source_replay_smoke(server_bin: Path) -> None:
         producers_before = len(re.findall(producer_pattern, before))
         reattaches_before = len(re.findall(reattach_pattern, before))
         spark = ConnectSession.builder.remote(f"sc://127.0.0.1:{proxy_port}").create()
-        values = [row.id for row in spark.table("warehouse.main.replay_events").collect()]
+        values = [
+            row.id for row in spark.table("warehouse.main.replay_events").collect()
+        ]
         if (
             len(values) != 50_000
             or values[0] != 0
@@ -308,8 +314,7 @@ def main() -> None:
                     "CREATE TABLE warehouse.main.copy LIKE warehouse.main.events",
                     "CREATE VIEW warehouse.main.forbidden_view "
                     "AS SELECT id FROM warehouse.main.events",
-                    "CREATE OR REPLACE VIEW warehouse.main.events "
-                    "AS SELECT 99 AS id",
+                    "CREATE OR REPLACE VIEW warehouse.main.events AS SELECT 99 AS id",
                     "DROP TABLE warehouse.main.events",
                     "DROP TABLE IF EXISTS warehouse.main.events",
                     "DROP VIEW warehouse.main.events",
@@ -489,7 +494,9 @@ def main() -> None:
                 except Exception as error:
                     assert "512 kib" in str(error).lower(), error
                 else:
-                    raise AssertionError("oversized DuckDB VARCHAR values were accepted")
+                    raise AssertionError(
+                        "oversized DuckDB VARCHAR values were accepted"
+                    )
 
                 filtered = sorted(
                     (row.id, row.label)

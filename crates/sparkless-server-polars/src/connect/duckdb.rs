@@ -247,6 +247,26 @@ fn project_output_schema(
         &ConnectExecutionPlan::Root(input.clone()),
         cancellation,
     )?;
+    if !relation_contains_join(input) {
+        for expression in expressions {
+            if let Some((_, identifier)) = projection_attribute(expression) {
+                let name = identifier.rsplit('.').next().unwrap_or(&identifier);
+                if source_schema
+                    .logical_fields()
+                    .iter()
+                    .filter(|field| field.name.eq_ignore_ascii_case(name))
+                    .take(2)
+                    .count()
+                    > 1
+                {
+                    return Err(failure(
+                        "CONNECT_ATTRIBUTE_AMBIGUOUS",
+                        "Connect column reference is ambiguous",
+                    ));
+                }
+            }
+        }
+    }
     let source_fields = if let Some(join) = transparent_join(input) {
         Some(join_source_field_map(
             session,
@@ -682,6 +702,9 @@ fn normalize_sql_output_schema(
         }
         if let Some(nullable) = sql_expression_nullability(&expression, &source_schema) {
             field.nullable = nullable;
+        }
+        if let Some(data_type) = sql_expression_type(&expression, Some(&source_schema))? {
+            field.data_type = data_type;
         }
     }
     Ok(StructType::from_logical_fields(fields))
@@ -1269,15 +1292,31 @@ impl<'a> PlanRenderer<'a> {
                             expression_aliases_for_relation(input_relation)?,
                         )
                     };
-                let condition = render_connect_expression(
-                    condition.as_ref().ok_or_else(|| {
-                        failure(
-                            "CONNECT_FILTER_CONDITION_REQUIRED",
-                            "Filter condition is required",
-                        )
-                    })?,
-                    &expression_aliases,
+                let condition = condition.as_ref().ok_or_else(|| {
+                    failure(
+                        "CONNECT_FILTER_CONDITION_REQUIRED",
+                        "Filter condition is required",
+                    )
+                })?;
+                let input_schema = describe_connect_plan(
+                    self.session,
+                    &ConnectExecutionPlan::Root(input_relation.clone()),
+                    &self.cancellation,
                 )?;
+                let condition = match condition {
+                    ConnectExpression::ExpressionString(expression) => {
+                        render_connect_expression_string_with_schema(
+                            expression,
+                            false,
+                            Some(&input_schema),
+                        )?
+                        .0
+                    }
+                    _ => {
+                        validate_connect_string_numeric_comparisons(condition, &input_schema)?;
+                        render_connect_expression(condition, &expression_aliases)?
+                    }
+                };
                 Ok(format!("(SELECT * FROM {input} WHERE {condition})"))
             }
             ConnectRelationKind::Project { input, expressions } => {
@@ -1303,7 +1342,28 @@ impl<'a> PlanRenderer<'a> {
                         condition: Some(condition),
                     } if matches!(&join.kind, ConnectRelationKind::Join { .. }) => {
                         let (input, aliases) = self.join_from(join, depth + 2)?;
-                        let condition = render_connect_expression(condition, &aliases)?;
+                        let input_schema = describe_connect_plan(
+                            self.session,
+                            &ConnectExecutionPlan::Root(join.as_ref().clone()),
+                            &self.cancellation,
+                        )?;
+                        let condition = match condition {
+                            ConnectExpression::ExpressionString(expression) => {
+                                render_connect_expression_string_with_schema(
+                                    expression,
+                                    false,
+                                    Some(&input_schema),
+                                )?
+                                .0
+                            }
+                            _ => {
+                                validate_connect_string_numeric_comparisons(
+                                    condition,
+                                    &input_schema,
+                                )?;
+                                render_connect_expression(condition, &aliases)?
+                            }
+                        };
                         (input, aliases, Some(condition))
                     }
                     _ => (
@@ -1572,19 +1632,15 @@ impl<'a> PlanRenderer<'a> {
             .first()
             .map(|from| self.sql_from(from))
             .transpose()?;
-        let source_schema = if select.projection.iter().any(sql_projection_has_sum) {
-            if let Some(from) = from.as_deref() {
-                Some(
-                    self.session
-                        .owner
-                        .describe_query(&format!("SELECT * FROM {from}"), &self.cancellation)
-                        .map_err(engine_failure)?,
-                )
-            } else {
-                Some(StructType::from_logical_fields(Vec::new()))
-            }
+        let source_schema = if let Some(from) = from.as_deref() {
+            Some(
+                self.session
+                    .owner
+                    .describe_query(&format!("SELECT * FROM {from}"), &self.cancellation)
+                    .map_err(engine_failure)?,
+            )
         } else {
-            None
+            Some(StructType::from_logical_fields(Vec::new()))
         };
         let projection = select
             .projection
@@ -1599,7 +1655,10 @@ impl<'a> PlanRenderer<'a> {
         }
         if let Some(filter) = &select.filter {
             sql.push_str(" WHERE ");
-            sql.push_str(&render_sql_expression(filter)?);
+            sql.push_str(&render_sql_expression_with_schema(
+                filter,
+                source_schema.as_ref(),
+            )?);
         }
         match &select.group_by {
             GroupByPlan::Expressions {
@@ -1610,7 +1669,9 @@ impl<'a> PlanRenderer<'a> {
                 sql.push_str(
                     &expressions
                         .iter()
-                        .map(render_sql_expression)
+                        .map(|expression| {
+                            render_sql_expression_with_schema(expression, source_schema.as_ref())
+                        })
                         .collect::<Result<Vec<_>, _>>()?
                         .join(", "),
                 );
@@ -1700,10 +1761,10 @@ impl<'a> PlanRenderer<'a> {
                     let (_, sql_type) = spark_sum_type(&source.data_type)?;
                     format!(
                         "CAST(SUM({}) AS {sql_type})",
-                        render_sql_expression(argument)?
+                        render_sql_expression_with_schema(argument, Some(source_schema))?
                     )
                 } else {
-                    render_sql_expression(expression)?
+                    render_sql_expression_with_schema(expression, source_schema)?
                 };
                 Ok(match alias {
                     Some(alias) => format!(
@@ -1799,14 +1860,6 @@ impl<'a> PlanRenderer<'a> {
             )),
         }
     }
-}
-
-fn sql_projection_has_sum(projection: &Projection) -> bool {
-    matches!(
-        projection,
-        Projection::Expression { expression, .. }
-            if matches!(&expression.shape, ExpressionShape::Function { name, .. } if name.eq_ignore_ascii_case("sum"))
-    )
 }
 
 fn validate_sql_query_shape(sql: &str) -> Result<(), ExecutionError> {
@@ -2030,8 +2083,73 @@ fn execute_command(
                         "INSERT table functions are not enabled",
                     ));
                 };
-                *name = execution_table_name(&session.owner, &name.to_string())?;
-                statement.to_string()
+                let table = execution_table_name(&session.owner, &name.to_string())?;
+                let table_reference = table.to_string();
+                let target_schema = session
+                    .owner
+                    .describe_query(
+                        &format!("SELECT * FROM {table_reference} LIMIT 0"),
+                        cancellation,
+                    )
+                    .map_err(engine_failure)?;
+                let Some(query) = insert.source.as_deref() else {
+                    return Err(failure(
+                        "CONNECT_INSERT_UNSUPPORTED",
+                        "INSERT requires literal VALUES rows",
+                    ));
+                };
+                let robin_sparkless_sql::ast::SetExpr::Values(values) = query.body.as_ref() else {
+                    return Err(failure(
+                        "CONNECT_INSERT_UNSUPPORTED",
+                        "INSERT requires literal VALUES rows",
+                    ));
+                };
+                let target_fields = target_schema.logical_fields();
+                let insert_columns = if insert.columns.is_empty() {
+                    target_fields
+                        .iter()
+                        .enumerate()
+                        .map(|(index, _)| index)
+                        .collect::<Vec<_>>()
+                } else {
+                    let mut indices = Vec::with_capacity(insert.columns.len());
+                    for column in &insert.columns {
+                        let mut matching = target_fields
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, field)| field.name.eq_ignore_ascii_case(&column.value));
+                        let Some((index, _)) = matching.next() else {
+                            return Err(failure(
+                                "CONNECT_INSERT_COLUMN_UNKNOWN",
+                                "INSERT column does not exist in the target table",
+                            ));
+                        };
+                        if matching.next().is_some() || indices.contains(&index) {
+                            return Err(failure(
+                                "CONNECT_INSERT_COLUMN_AMBIGUOUS",
+                                "INSERT column must resolve to one unique target column",
+                            ));
+                        }
+                        indices.push(index);
+                    }
+                    indices
+                };
+                let mut rows = Vec::with_capacity(values.rows.len());
+                for row in &values.rows {
+                    if row.len() != insert_columns.len() {
+                        return Err(failure(
+                            "CONNECT_INSERT_COLUMN_COUNT",
+                            "INSERT VALUES column count must match its target column list",
+                        ));
+                    }
+                    let mut target_values = vec!["NULL".to_string(); target_fields.len()];
+                    for (value, target_index) in row.iter().zip(&insert_columns) {
+                        target_values[*target_index] =
+                            render_insert_value(value, &target_fields[*target_index].data_type)?;
+                    }
+                    rows.push(format!("({})", target_values.join(", ")));
+                }
+                format!("INSERT INTO {table_reference} VALUES {}", rows.join(", "))
             }
             _ => {
                 return Err(failure(
@@ -2333,6 +2451,172 @@ fn simple_insert_value(expression: &robin_sparkless_sql::ast::Expr) -> bool {
     }
 }
 
+fn render_insert_value(
+    expression: &robin_sparkless_sql::ast::Expr,
+    target_type: &DataType,
+) -> Result<String, ExecutionError> {
+    use robin_sparkless_sql::ast::{Expr, Value};
+
+    if matches!(expression, Expr::Value(value) if matches!(&value.value, Value::Null)) {
+        return Ok("NULL".into());
+    }
+    if let Expr::Cast {
+        expr,
+        data_type,
+        kind: robin_sparkless_sql::ast::CastKind::Cast,
+        array: false,
+        format: None,
+    } = expression
+    {
+        let Expr::Value(value) = expr.as_ref() else {
+            return Err(insert_type_mismatch());
+        };
+        if !matches!(&value.value, Value::SingleQuotedString(_)) {
+            return Err(insert_type_mismatch());
+        }
+        let source_type = data_type
+            .to_string()
+            .chars()
+            .filter(|character| !character.is_ascii_whitespace())
+            .collect::<String>()
+            .to_ascii_uppercase();
+        return match target_type {
+            DataType::Timestamp
+                if matches!(
+                    source_type.as_str(),
+                    "TIMESTAMP"
+                        | "TIMESTAMP(0)"
+                        | "TIMESTAMP(1)"
+                        | "TIMESTAMP(2)"
+                        | "TIMESTAMP(3)"
+                        | "TIMESTAMP(4)"
+                        | "TIMESTAMP(5)"
+                        | "TIMESTAMP(6)"
+                        | "TIMESTAMPWITHTIMEZONE"
+                        | "TIMESTAMPTZ"
+                        | "TIMESTAMP_LTZ"
+                ) =>
+            {
+                Ok(format!("CAST({expr} AS TIMESTAMP WITH TIME ZONE)"))
+            }
+            DataType::TimestampNtz
+                if matches!(
+                    source_type.as_str(),
+                    "TIMESTAMPWITHOUTTIMEZONE" | "TIMESTAMPNTZ" | "TIMESTAMP_NTZ"
+                ) =>
+            {
+                Ok(format!("CAST({expr} AS TIMESTAMP WITHOUT TIME ZONE)"))
+            }
+            DataType::Decimal(precision, scale)
+                if source_type == format!("DECIMAL({precision},{scale})")
+                    || source_type == format!("NUMERIC({precision},{scale})") =>
+            {
+                Ok(format!("CAST({expr} AS DECIMAL({precision},{scale}))"))
+            }
+            _ => Err(insert_type_mismatch()),
+        };
+    }
+
+    if let Expr::Value(value) = expression {
+        match (&value.value, target_type) {
+            (Value::SingleQuotedString(_), DataType::String) => {
+                return Ok(expression.to_string());
+            }
+            (Value::SingleQuotedString(_), DataType::Date) => {
+                return Ok(format!("CAST({expression} AS DATE)"));
+            }
+            (Value::Boolean(_), DataType::Boolean) => return Ok(expression.to_string()),
+            (Value::Number(..), _) => {}
+            _ => return Err(insert_type_mismatch()),
+        }
+    }
+
+    let Some(source_type) = numeric_insert_literal_type(expression) else {
+        return Err(insert_type_mismatch());
+    };
+    let Some(target_sql_type) = insert_target_sql_type(target_type) else {
+        return Err(insert_type_mismatch());
+    };
+    let source_is_integral = integral_bits(&source_type).is_some();
+    let source_is_decimal = matches!(&source_type, DataType::Decimal(..));
+    let compatible = match target_type {
+        DataType::Byte | DataType::Short | DataType::Integer | DataType::Long => {
+            source_is_integral || source_is_decimal
+        }
+        DataType::Float => {
+            source_is_integral || source_is_decimal || matches!(&source_type, DataType::Float)
+        }
+        DataType::Double => {
+            source_is_integral
+                || source_is_decimal
+                || matches!(&source_type, DataType::Float | DataType::Double)
+        }
+        DataType::Decimal(..) => source_is_integral || source_is_decimal,
+        DataType::String => {
+            source_is_integral
+                || source_is_decimal
+                || matches!(&source_type, DataType::Float | DataType::Double)
+        }
+        _ => false,
+    };
+    if !compatible {
+        return Err(insert_type_mismatch());
+    }
+
+    let value = if matches!(
+        target_type,
+        DataType::Byte | DataType::Short | DataType::Integer | DataType::Long
+    ) && source_is_decimal
+    {
+        format!("TRUNC({expression})")
+    } else {
+        expression.to_string()
+    };
+    Ok(format!("CAST({value} AS {target_sql_type})"))
+}
+
+fn numeric_insert_literal_type(expression: &robin_sparkless_sql::ast::Expr) -> Option<DataType> {
+    use robin_sparkless_sql::ast::{Expr, UnaryOperator, Value};
+    match expression {
+        Expr::Value(value) if matches!(&value.value, Value::Number(..)) => {
+            sql_literal_type(&expression.to_string())
+        }
+        Expr::UnaryOp {
+            op: UnaryOperator::Plus | UnaryOperator::Minus,
+            expr,
+        } if matches!(expr.as_ref(), Expr::Value(value) if matches!(&value.value, Value::Number(..))) => {
+            sql_literal_type(&expression.to_string())
+        }
+        _ => None,
+    }
+}
+
+fn insert_target_sql_type(data_type: &DataType) -> Option<String> {
+    Some(match data_type {
+        DataType::Boolean => "BOOLEAN".into(),
+        DataType::Byte => "TINYINT".into(),
+        DataType::Short => "SMALLINT".into(),
+        DataType::Integer => "INTEGER".into(),
+        DataType::Long => "BIGINT".into(),
+        DataType::Float => "FLOAT".into(),
+        DataType::Double => "DOUBLE".into(),
+        DataType::Decimal(precision, scale) => format!("DECIMAL({precision},{scale})"),
+        DataType::String => "VARCHAR".into(),
+        DataType::Date => "DATE".into(),
+        DataType::Timestamp => "TIMESTAMP WITH TIME ZONE".into(),
+        DataType::TimestampNtz => "TIMESTAMP WITHOUT TIME ZONE".into(),
+        DataType::Binary => "BLOB".into(),
+        _ => return None,
+    })
+}
+
+fn insert_type_mismatch() -> ExecutionError {
+    failure(
+        "CONNECT_INSERT_TYPE_MISMATCH",
+        "INSERT literal cannot be safely assigned to the target column type",
+    )
+}
+
 fn execution_table_name(
     owner: &robin_sparkless_duckdb::DuckDbExecutionOwner,
     identifier: &str,
@@ -2530,6 +2814,14 @@ fn render_connect_expression_string(
     expression: &str,
     allow_alias: bool,
 ) -> Result<(String, Option<String>), ExecutionError> {
+    render_connect_expression_string_with_schema(expression, allow_alias, None)
+}
+
+fn render_connect_expression_string_with_schema(
+    expression: &str,
+    allow_alias: bool,
+    source_schema: Option<&StructType>,
+) -> Result<(String, Option<String>), ExecutionError> {
     const MAX_EXPRESSION_BYTES: usize = 4096;
     if expression.len() > MAX_EXPRESSION_BYTES {
         return Err(failure(
@@ -2591,9 +2883,76 @@ fn render_connect_expression_string(
         ));
     }
     Ok((
-        render_sql_expression(expression)?,
+        render_sql_expression_with_schema(expression, source_schema)?,
         alias.as_ref().map(|alias| alias.to_string()),
     ))
+}
+
+fn validate_connect_string_numeric_comparisons(
+    expression: &ConnectExpression,
+    source_schema: &StructType,
+) -> Result<(), ExecutionError> {
+    let ConnectExpression::Function {
+        name, arguments, ..
+    } = expression
+    else {
+        return Ok(());
+    };
+    let operator = name.to_ascii_lowercase();
+    if matches!(
+        operator.as_str(),
+        "=" | "==" | "!=" | "<>" | ">" | ">=" | "<" | "<="
+    ) && arguments.len() == 2
+    {
+        validate_connect_attribute_string_comparison(&arguments[0], &arguments[1], source_schema)?;
+        validate_connect_attribute_string_comparison(&arguments[1], &arguments[0], source_schema)?;
+    }
+    for argument in arguments {
+        validate_connect_string_numeric_comparisons(argument, source_schema)?;
+    }
+    Ok(())
+}
+
+fn validate_connect_attribute_string_comparison(
+    attribute: &ConnectExpression,
+    literal: &ConnectExpression,
+    source_schema: &StructType,
+) -> Result<(), ExecutionError> {
+    let ConnectExpression::Attribute { identifier, .. } = attribute else {
+        return Ok(());
+    };
+    let ConnectExpression::Literal(ConnectLiteral::String(value)) = literal else {
+        return Ok(());
+    };
+    let name = identifier.rsplit('.').next().unwrap_or(identifier);
+    let mut matches = source_schema
+        .logical_fields()
+        .iter()
+        .filter(|field| field.name.eq_ignore_ascii_case(name));
+    let Some(field) = matches.next() else {
+        return Ok(());
+    };
+    if matches.next().is_some() || numeric_sql_type(&field.data_type).is_none() {
+        return Ok(());
+    }
+    let valid = match &field.data_type {
+        DataType::Byte => value.parse::<i8>().is_ok(),
+        DataType::Short => value.parse::<i16>().is_ok(),
+        DataType::Integer => value.parse::<i32>().is_ok(),
+        DataType::Long => value.parse::<i64>().is_ok(),
+        DataType::Float => value.parse::<f32>().is_ok_and(f32::is_finite),
+        DataType::Double => value.parse::<f64>().is_ok_and(f64::is_finite),
+        DataType::Decimal(..) => value.parse::<f64>().is_ok_and(f64::is_finite),
+        _ => true,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(failure(
+            "CONNECT_EXPRESSION_TYPE_MISMATCH",
+            "string literal cannot be cast to the numeric type required by the comparison",
+        ))
+    }
 }
 
 fn render_connect_expression(
@@ -2747,6 +3106,13 @@ fn render_literal(literal: &ConnectLiteral) -> Result<String, ExecutionError> {
 }
 
 fn render_sql_expression(expression: &SqlExpression) -> Result<String, ExecutionError> {
+    render_sql_expression_with_schema(expression, None)
+}
+
+fn render_sql_expression_with_schema(
+    expression: &SqlExpression,
+    source_schema: Option<&StructType>,
+) -> Result<String, ExecutionError> {
     match &expression.shape {
         ExpressionShape::Identifier(parts) => {
             if parts.is_empty() || parts.len() > 3 {
@@ -2774,7 +3140,7 @@ fn render_sql_expression(expression: &SqlExpression) -> Result<String, Execution
             }
             Ok(format!(
                 "({operator} {})",
-                render_sql_expression(expression)?
+                render_sql_expression_with_schema(expression, source_schema)?
             ))
         }
         ExpressionShape::IsNull {
@@ -2782,7 +3148,7 @@ fn render_sql_expression(expression: &SqlExpression) -> Result<String, Execution
             negated,
         } => Ok(format!(
             "({} IS {}NULL)",
-            render_sql_expression(expression)?,
+            render_sql_expression_with_schema(expression, source_schema)?,
             if *negated { "NOT " } else { "" }
         )),
         ExpressionShape::Binary {
@@ -2811,11 +3177,35 @@ fn render_sql_expression(expression: &SqlExpression) -> Result<String, Execution
                     "SQL binary operator is not enabled",
                 ));
             }
-            Ok(format!(
-                "({} {operator} {})",
-                render_sql_expression(left)?,
-                render_sql_expression(right)?
-            ))
+            let mut left_sql = render_sql_expression_with_schema(left, source_schema)?;
+            let mut right_sql = render_sql_expression_with_schema(right, source_schema)?;
+            let left_type = sql_expression_type(left, source_schema)?;
+            let right_type = sql_expression_type(right, source_schema)?;
+            if matches!(
+                operator.as_str(),
+                "=" | "!=" | "<>" | ">" | ">=" | "<" | "<="
+            ) {
+                if let (Some(DataType::String), Some(right_type)) =
+                    (left_type.as_ref(), right_type.as_ref())
+                    && numeric_sql_type(right_type).is_some()
+                {
+                    left_sql = cast_sql_numeric_string(left, right_type)?;
+                } else if let (Some(left_type), Some(DataType::String)) =
+                    (left_type.as_ref(), right_type.as_ref())
+                    && numeric_sql_type(left_type).is_some()
+                {
+                    right_sql = cast_sql_numeric_string(right, left_type)?;
+                }
+            }
+            let binary = format!("({left_sql} {operator} {right_sql})");
+            if matches!(operator.as_str(), "+" | "-" | "*" | "/" | "%")
+                && let Some(result_type) = sql_expression_type(expression, source_schema)?
+                && let Some(sql_type) = numeric_sql_type(&result_type)
+            {
+                Ok(format!("CAST({binary} AS {sql_type})"))
+            } else {
+                Ok(binary)
+            }
         }
         ExpressionShape::Function {
             name,
@@ -2839,7 +3229,7 @@ fn render_sql_expression(expression: &SqlExpression) -> Result<String, Execution
             }
             let args = arguments
                 .iter()
-                .map(render_sql_expression)
+                .map(|argument| render_sql_expression_with_schema(argument, source_schema))
                 .collect::<Result<Vec<_>, _>>()?;
             if args.len() != 1 {
                 return Err(failure(
@@ -2854,6 +3244,290 @@ fn render_sql_expression(expression: &SqlExpression) -> Result<String, Execution
             "composite SQL expressions are outside the enabled subset",
         )),
     }
+}
+
+fn sql_expression_type(
+    expression: &SqlExpression,
+    source_schema: Option<&StructType>,
+) -> Result<Option<DataType>, ExecutionError> {
+    let data_type = match &expression.shape {
+        ExpressionShape::Identifier(parts) => {
+            let Some(name) = parts.last() else {
+                return Ok(None);
+            };
+            let Some(source_schema) = source_schema else {
+                return Ok(None);
+            };
+            let mut matches = source_schema
+                .logical_fields()
+                .iter()
+                .filter(|field| field.name.eq_ignore_ascii_case(name));
+            let Some(field) = matches.next() else {
+                return Ok(None);
+            };
+            if matches.next().is_some() {
+                return Ok(None);
+            }
+            Some(field.data_type.clone())
+        }
+        ExpressionShape::Literal => sql_literal_type(&expression.sql),
+        ExpressionShape::Unary {
+            operator,
+            expression,
+        } => {
+            if operator.eq_ignore_ascii_case("NOT") {
+                Some(DataType::Boolean)
+            } else {
+                sql_expression_type(expression, source_schema)?
+            }
+        }
+        ExpressionShape::IsNull { .. } => Some(DataType::Boolean),
+        ExpressionShape::Binary {
+            operator,
+            left,
+            right,
+        } => {
+            if matches!(
+                operator.as_str(),
+                "AND" | "OR" | "=" | "!=" | "<>" | ">" | ">=" | "<" | "<="
+            ) {
+                Some(DataType::Boolean)
+            } else {
+                let left = sql_expression_type(left, source_schema)?;
+                let right = sql_expression_type(right, source_schema)?;
+                match (left.as_ref(), right.as_ref()) {
+                    (Some(left), Some(right)) => sql_numeric_binary_type(operator, left, right)?,
+                    _ => None,
+                }
+            }
+        }
+        ExpressionShape::Function {
+            name, arguments, ..
+        } => {
+            let name = name.to_ascii_lowercase();
+            if name == "count" {
+                Some(DataType::Long)
+            } else if arguments.len() == 1 && name == "abs" {
+                sql_expression_type(&arguments[0], source_schema)?
+            } else if arguments.len() == 1 && name == "sum" {
+                match sql_expression_type(&arguments[0], source_schema)? {
+                    Some(input_type) => Some(spark_sum_type(&input_type)?.0),
+                    None => None,
+                }
+            } else {
+                None
+            }
+        }
+        ExpressionShape::Composite => None,
+    };
+    Ok(data_type)
+}
+
+fn sql_literal_type(sql: &str) -> Option<DataType> {
+    let value = sql.trim();
+    if value.eq_ignore_ascii_case("TRUE") || value.eq_ignore_ascii_case("FALSE") {
+        return Some(DataType::Boolean);
+    }
+    if value.eq_ignore_ascii_case("NULL") {
+        return None;
+    }
+    if value.starts_with('\'') && value.ends_with('\'') {
+        return Some(DataType::String);
+    }
+    if value.contains(['e', 'E']) {
+        return value.parse::<f64>().ok().map(|_| DataType::Double);
+    }
+    if let Some((whole, fraction)) = value.split_once('.') {
+        let precision = whole
+            .trim_start_matches(['+', '-'])
+            .len()
+            .saturating_add(fraction.len())
+            .max(1);
+        let Ok(precision) = u8::try_from(precision) else {
+            return Some(DataType::Double);
+        };
+        if precision > 38 {
+            return Some(DataType::Double);
+        }
+        return Some(DataType::Decimal(precision, fraction.len() as u8));
+    }
+    if value.parse::<i32>().is_ok() {
+        Some(DataType::Integer)
+    } else if value.parse::<i64>().is_ok() {
+        Some(DataType::Long)
+    } else {
+        let precision = value.trim_start_matches(['+', '-']).len();
+        u8::try_from(precision)
+            .ok()
+            .filter(|precision| *precision <= 38)
+            .map(|precision| DataType::Decimal(precision.max(1), 0))
+            .or(Some(DataType::Double))
+    }
+}
+
+fn sql_numeric_binary_type(
+    operator: &str,
+    left: &DataType,
+    right: &DataType,
+) -> Result<Option<DataType>, ExecutionError> {
+    use DataType::{Byte, Decimal, Double, Float, Integer, Long, Short};
+    if matches!(left, Double) || matches!(right, Double) {
+        return Ok(Some(Double));
+    }
+    if matches!(left, Float) || matches!(right, Float) {
+        return Ok(Some(Float));
+    }
+    let left_decimal = decimal_shape(left);
+    let right_decimal = decimal_shape(right);
+    if let (Some((left_precision, left_scale)), Some((right_precision, right_scale))) =
+        (left_decimal, right_decimal)
+    {
+        let (precision, scale) = match operator {
+            "+" | "-" => (
+                left_precision
+                    .saturating_sub(left_scale)
+                    .max(right_precision.saturating_sub(right_scale))
+                    .saturating_add(left_scale.max(right_scale))
+                    .saturating_add(1),
+                left_scale.max(right_scale),
+            ),
+            "*" => (
+                left_precision
+                    .saturating_add(right_precision)
+                    .saturating_add(1),
+                left_scale.saturating_add(right_scale),
+            ),
+            "/" => {
+                let scale = 6u8.max(left_scale.saturating_add(right_precision).saturating_add(1));
+                (
+                    left_precision
+                        .saturating_sub(left_scale)
+                        .saturating_add(right_scale)
+                        .saturating_add(scale),
+                    scale,
+                )
+            }
+            "%" => (
+                left_precision
+                    .saturating_sub(left_scale)
+                    .min(right_precision.saturating_sub(right_scale))
+                    .saturating_add(left_scale.max(right_scale)),
+                left_scale.max(right_scale),
+            ),
+            _ => return Ok(None),
+        };
+        let (precision, scale) = adjust_decimal_precision(precision, scale);
+        return Ok(Some(Decimal(precision, scale)));
+    }
+    if let (Some(left), Some(right)) = (integral_bits(left), integral_bits(right)) {
+        let data_type = if operator == "/" {
+            Double
+        } else if left.max(right) >= 64 {
+            Long
+        } else {
+            Integer
+        };
+        return Ok(Some(data_type));
+    }
+    if matches!(left, Byte | Short | Integer | Long)
+        || matches!(right, Byte | Short | Integer | Long)
+    {
+        return Ok(None);
+    }
+    Ok(None)
+}
+
+fn decimal_shape(data_type: &DataType) -> Option<(u8, u8)> {
+    match data_type {
+        DataType::Decimal(precision, scale) => Some((*precision, *scale)),
+        DataType::Byte => Some((3, 0)),
+        DataType::Short => Some((5, 0)),
+        DataType::Integer => Some((10, 0)),
+        DataType::Long => Some((20, 0)),
+        _ => None,
+    }
+}
+
+fn integral_bits(data_type: &DataType) -> Option<u8> {
+    match data_type {
+        DataType::Byte => Some(8),
+        DataType::Short => Some(16),
+        DataType::Integer => Some(32),
+        DataType::Long => Some(64),
+        _ => None,
+    }
+}
+
+fn adjust_decimal_precision(precision: u8, scale: u8) -> (u8, u8) {
+    if precision <= 38 {
+        return (precision.max(1), scale.min(precision));
+    }
+    let integral_digits = precision.saturating_sub(scale);
+    let adjusted_scale = scale.min(6).max(38u8.saturating_sub(integral_digits));
+    (
+        integral_digits.saturating_add(adjusted_scale).clamp(1, 38),
+        adjusted_scale,
+    )
+}
+
+fn numeric_sql_type(data_type: &DataType) -> Option<String> {
+    Some(match data_type {
+        DataType::Byte => "TINYINT".into(),
+        DataType::Short => "SMALLINT".into(),
+        DataType::Integer => "INTEGER".into(),
+        DataType::Long => "BIGINT".into(),
+        DataType::Float => "FLOAT".into(),
+        DataType::Double => "DOUBLE".into(),
+        DataType::Decimal(precision, scale) => format!("DECIMAL({precision},{scale})"),
+        _ => return None,
+    })
+}
+
+fn cast_sql_numeric_string(
+    expression: &SqlExpression,
+    target_type: &DataType,
+) -> Result<String, ExecutionError> {
+    let ExpressionShape::Literal = &expression.shape else {
+        return Err(failure(
+            "CONNECT_SQL_TYPE_UNSUPPORTED",
+            "implicit string-to-number conversion is enabled for string literals only",
+        ));
+    };
+    let raw = expression
+        .sql
+        .trim()
+        .strip_prefix('\'')
+        .and_then(|value| value.strip_suffix('\''))
+        .map(|value| value.replace("''", "'"))
+        .ok_or_else(|| {
+            failure(
+                "CONNECT_SQL_TYPE_UNSUPPORTED",
+                "implicit string-to-number conversion is enabled for string literals only",
+            )
+        })?;
+    let valid = match target_type {
+        DataType::Byte => raw.parse::<i8>().is_ok(),
+        DataType::Short => raw.parse::<i16>().is_ok(),
+        DataType::Integer => raw.parse::<i32>().is_ok(),
+        DataType::Long => raw.parse::<i64>().is_ok(),
+        DataType::Float => raw.parse::<f32>().is_ok(),
+        DataType::Double => raw.parse::<f64>().is_ok(),
+        DataType::Decimal(_, _) => raw.parse::<f64>().is_ok(),
+        _ => false,
+    };
+    if !valid {
+        return Err(failure(
+            "CONNECT_SQL_TYPE_MISMATCH",
+            "string literal cannot be cast to the numeric type required by the expression",
+        ));
+    }
+    let target = numeric_sql_type(target_type).ok_or_else(|| {
+        failure(
+            "CONNECT_SQL_TYPE_UNSUPPORTED",
+            "numeric cast target is unsupported",
+        )
+    })?;
+    Ok(format!("CAST({} AS {target})", expression.sql))
 }
 
 fn binary_operator(name: &str) -> Option<&'static str> {

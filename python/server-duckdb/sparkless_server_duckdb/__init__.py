@@ -15,17 +15,23 @@ from sparkless_connect import (
 
 
 def executable_path() -> str:
-    name = "sparkless-server-duckdb.exe" if os.name == "nt" else "sparkless-server-duckdb"
+    name = (
+        "sparkless-server-duckdb.exe" if os.name == "nt" else "sparkless-server-duckdb"
+    )
     path = Path(__file__).resolve().parent / name
     if not path.is_file():
-        raise FileNotFoundError("sparkless-server-duckdb has no binary for this platform")
+        raise FileNotFoundError(
+            "sparkless-server-duckdb has no binary for this platform"
+        )
     return str(path)
 
 
 def quack_extension_path() -> str:
     path = Path(__file__).resolve().parent / "quack.duckdb_extension"
     if not path.is_file():
-        raise FileNotFoundError("sparkless-server-duckdb has no bundled Quack extension")
+        raise FileNotFoundError(
+            "sparkless-server-duckdb has no bundled Quack extension"
+        )
     return str(path)
 
 

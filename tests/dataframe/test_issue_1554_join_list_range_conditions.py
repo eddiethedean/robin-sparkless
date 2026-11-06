@@ -42,6 +42,6 @@ def test_issue_1554_join_list_multiple_equalities(spark) -> None:
         [left["a"] == right["a"], left["b"] == right["b"]],
         "inner",
     ).collect()
-    assert [tuple(row.values()) if hasattr(row, "values") else tuple(row) for row in result] == [
-        (1, 2, 10, 1, 2, 20)
-    ]
+    assert [
+        tuple(row.values()) if hasattr(row, "values") else tuple(row) for row in result
+    ] == [(1, 2, 10, 1, 2, 20)]

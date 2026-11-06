@@ -192,7 +192,9 @@ def _validate_ready(
             )
         )
     if expected_backend not in {"polars", "duckdb"}:
-        raise SparklessServerError("selected execution backend must be 'polars' or 'duckdb'")
+        raise SparklessServerError(
+            "selected execution backend must be 'polars' or 'duckdb'"
+        )
     if record.get("execution_backend") != expected_backend:
         raise SparklessServerError(
             "server execution backend is {}, expected {}".format(

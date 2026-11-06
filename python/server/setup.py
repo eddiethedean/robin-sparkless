@@ -23,7 +23,9 @@ class build_py(_build_py):
         super().run()
         source = os.environ.get("SPARKLESS_SERVER_BINARY")
         if not source:
-            raise RuntimeError("SPARKLESS_SERVER_BINARY must point to the base server executable")
+            raise RuntimeError(
+                "SPARKLESS_SERVER_BINARY must point to the base server executable"
+            )
         source_path = Path(source).expanduser().resolve()
         if not source_path.is_file():
             raise RuntimeError("SPARKLESS_SERVER_BINARY does not name a file")
@@ -32,7 +34,9 @@ class build_py(_build_py):
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_path, destination)
         if os.name != "nt":
-            destination.chmod(destination.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+            destination.chmod(
+                destination.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+            )
 
 
 class bdist_wheel(_bdist_wheel):
@@ -49,4 +53,7 @@ class bdist_wheel(_bdist_wheel):
         return "py3", "none", platform
 
 
-setup(cmdclass={"build_py": build_py, "bdist_wheel": bdist_wheel}, distclass=BinaryDistribution)
+setup(
+    cmdclass={"build_py": build_py, "bdist_wheel": bdist_wheel},
+    distclass=BinaryDistribution,
+)

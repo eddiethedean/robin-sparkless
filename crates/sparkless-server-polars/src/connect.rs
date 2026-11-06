@@ -688,6 +688,10 @@ struct ConnectResponseSender {
     deadline: Instant,
     queue_timeout: Duration,
     active_compute: Arc<tokio::sync::Semaphore>,
+    // DuckDB streams retain a pooled connection while waiting for an Arrow response ack. Keeping
+    // their compute permit prevents other queries from occupying every permit while waiting for
+    // those connections, which would strand the streams before they can read another batch.
+    keep_duckdb_read_admission: bool,
     compute_permit: Option<tokio::sync::OwnedSemaphorePermit>,
     runtime: tokio::runtime::Handle,
     cancellation: robin_sparkless_core::engine::CancellationToken,
@@ -823,7 +827,7 @@ impl ConnectResponseSender {
         if blocked && let Ok(mut blocked_since) = self.send_blocked_since.lock() {
             *blocked_since = Some(send_started);
         }
-        if blocked {
+        if blocked && !self.keep_duckdb_read_admission {
             // Sending can block while the client drains its previous response. Yield the scarce
             // compute slot during that wait; the producer reacquires it before asking DuckDB or
             // Polars for the next batch.
@@ -849,7 +853,9 @@ impl ConnectResponseSender {
                 }
                 self.record_sent_response(sender_bytes, response_rows, blocked_send_time);
                 if waits_for_client_ack {
-                    drop(self.compute_permit.take());
+                    if !self.keep_duckdb_read_admission {
+                        drop(self.compute_permit.take());
+                    }
                     let ack_started = Instant::now();
                     let ack_deadline =
                         (ack_started + CONNECT_RESPONSE_ACK_TIMEOUT).min(self.deadline);
@@ -1161,6 +1167,7 @@ fn start_connect_producer(
     cancellation: robin_sparkless_core::engine::CancellationToken,
     sender: tokio::sync::mpsc::Sender<ConnectQueuedResponse>,
     active_compute: Arc<tokio::sync::Semaphore>,
+    keep_duckdb_read_admission: bool,
     queue_timeout: Duration,
     deadline: Instant,
     planning_wait: Duration,
@@ -1266,6 +1273,7 @@ fn start_connect_producer(
             deadline,
             queue_timeout,
             active_compute,
+            keep_duckdb_read_admission,
             compute_permit: Some(compute_permit),
             runtime,
             cancellation: cancellation.clone(),
@@ -1654,6 +1662,7 @@ impl ConnectApplication for ConnectService {
             cancellation.clone(),
             sender,
             Arc::clone(&self.server.inner.execution.admission().active),
+            self.server.inner.execution_backend == "duckdb",
             self.server.inner.config.queue_timeout,
             deadline,
             planning_wait,

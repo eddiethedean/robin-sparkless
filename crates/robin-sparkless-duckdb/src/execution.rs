@@ -17,11 +17,9 @@ use robin_sparkless_core::engine::{ArrowIpcStream, CancellationToken};
 use robin_sparkless_core::{DataType, EngineError, LogicalField, StructType};
 use serde::Deserialize;
 use std::collections::BTreeMap;
-use std::ffi::{CStr, CString};
 use std::io::Cursor;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
-use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
@@ -1014,75 +1012,25 @@ fn open_execution_connection(
 }
 
 struct SharedLocalDatabase {
-    handle: duckdb::ffi::duckdb_database,
+    anchor: Mutex<Connection>,
 }
-
-// The shared DuckDB database handle is used only to create independent connections. Each
-// connection is exclusively owned, and the Arc-held database handle outlives all of them.
-unsafe impl Send for SharedLocalDatabase {}
-unsafe impl Sync for SharedLocalDatabase {}
 
 impl SharedLocalDatabase {
     fn open(path: &Path) -> Result<Self, EngineError> {
-        let path = local_database_path_cstring(path)?;
-        let mut handle = ptr::null_mut();
-        let mut error = ptr::null_mut();
-        let status = unsafe {
-            duckdb::ffi::duckdb_open_ext(path.as_ptr(), &mut handle, ptr::null_mut(), &mut error)
-        };
-        let error_message = if error.is_null() {
-            None
-        } else {
-            let message = unsafe { CStr::from_ptr(error) }
-                .to_string_lossy()
-                .into_owned();
-            unsafe { duckdb::ffi::duckdb_free(error.cast()) };
-            Some(message)
-        };
-        if status != duckdb::ffi::DuckDBSuccess || handle.is_null() {
-            if !handle.is_null() {
-                unsafe { duckdb::ffi::duckdb_close(&mut handle) };
-            }
-            return Err(EngineError::invalid_input(format!(
-                "DuckDB execution database could not open: {}",
-                error_message.unwrap_or_else(|| "DuckDB open failed".into())
-            )));
-        }
-        Ok(Self { handle })
+        let config = duckdb::Config::default()
+            .with("storage_compatibility_version", "v1.5.0")
+            .map_err(duckdb_failure)?;
+        let anchor = Connection::open_with_flags(path, config).map_err(duckdb_failure)?;
+        Ok(Self {
+            anchor: Mutex::new(anchor),
+        })
     }
 
     fn connect(&self) -> Result<Connection, EngineError> {
-        // SAFETY: this handle is owned by the shared database wrapper and remains alive through
-        // the Arc held by the server and query pool. Connections close only their connection
-        // handle; the wrapper closes the database after its last owner is dropped.
-        unsafe { Connection::open_from_raw(self.handle) }.map_err(duckdb_failure)
-    }
-}
-
-impl Drop for SharedLocalDatabase {
-    fn drop(&mut self) {
-        if !self.handle.is_null() {
-            unsafe { duckdb::ffi::duckdb_close(&mut self.handle) };
-        }
-    }
-}
-
-fn local_database_path_cstring(path: &Path) -> Result<CString, EngineError> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::ffi::OsStrExt;
-        CString::new(path.as_os_str().as_bytes()).map_err(|error| {
-            EngineError::invalid_input(format!("DuckDB database path contains a NUL byte: {error}"))
-        })
-    }
-    #[cfg(not(unix))]
-    {
-        let path = path.to_str().ok_or_else(|| {
-            EngineError::invalid_input("DuckDB database path must be valid UTF-8".into())
+        let anchor = self.anchor.lock().map_err(|_| {
+            EngineError::internal("local DuckDB execution database is unavailable".into())
         })?;
-        CString::new(path).map_err(|error| {
-            EngineError::invalid_input(format!("DuckDB database path contains a NUL byte: {error}"))
-        })
+        anchor.try_clone().map_err(duckdb_failure)
     }
 }
 

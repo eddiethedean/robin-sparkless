@@ -31,15 +31,29 @@ class build_py(_build_py):
         extension_path = Path(extension).expanduser().resolve()
         if not source_path.is_file():
             raise RuntimeError("SPARKLESS_SERVER_BINARY does not name a file")
-        if not extension_path.is_file() or extension_path.name != "quack.duckdb_extension":
-            raise RuntimeError("SPARKLESS_QUACK_EXTENSION_BINARY must name the matching Quack extension")
+        if (
+            not extension_path.is_file()
+            or extension_path.name != "quack.duckdb_extension"
+        ):
+            raise RuntimeError(
+                "SPARKLESS_QUACK_EXTENSION_BINARY must name the matching Quack extension"
+            )
         package_dir = Path(self.build_lib) / "sparkless_server_duckdb"
         package_dir.mkdir(parents=True, exist_ok=True)
-        binary_name = "sparkless-server-duckdb.exe" if os.name == "nt" else "sparkless-server-duckdb"
+        binary_name = (
+            "sparkless-server-duckdb.exe"
+            if os.name == "nt"
+            else "sparkless-server-duckdb"
+        )
         binary_destination = package_dir / binary_name
         shutil.copy2(source_path, binary_destination)
         if os.name != "nt":
-            binary_destination.chmod(binary_destination.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+            binary_destination.chmod(
+                binary_destination.stat().st_mode
+                | stat.S_IXUSR
+                | stat.S_IXGRP
+                | stat.S_IXOTH
+            )
         shutil.copy2(extension_path, package_dir / "quack.duckdb_extension")
         notice = Path(__file__).parent / "sparkless_server_duckdb" / "NOTICE-quack.txt"
         if not notice.is_file():
@@ -61,4 +75,7 @@ class bdist_wheel(_bdist_wheel):
         return "py3", "none", platform
 
 
-setup(cmdclass={"build_py": build_py, "bdist_wheel": bdist_wheel}, distclass=BinaryDistribution)
+setup(
+    cmdclass={"build_py": build_py, "bdist_wheel": bdist_wheel},
+    distclass=BinaryDistribution,
+)

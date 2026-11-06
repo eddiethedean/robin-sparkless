@@ -758,7 +758,9 @@ def test_read_only_external_owner_rejects_insert_before_table_lookup(session):
             return None
 
         def resolve_table(self, identifier):
-            raise AssertionError("read-only INSERT should be rejected before table lookup")
+            raise AssertionError(
+                "read-only INSERT should be rejected before table lookup"
+            )
 
     session.set_external_catalog_provider(ReadOnlyOwner())
     with pytest.raises(SparklessError) as exc_info:

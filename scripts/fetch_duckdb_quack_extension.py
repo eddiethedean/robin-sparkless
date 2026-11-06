@@ -23,14 +23,10 @@ MAX_EXTENSION_BYTES = 128 * 1024 * 1024
 def fetch_extension(platform: str, output: Path) -> tuple[int, str, str]:
     if platform not in PLATFORMS:
         raise ValueError(f"unsupported DuckDB Quack platform: {platform}")
-    url = (
-        "https://extensions.duckdb.org/v{}/{}/quack.duckdb_extension.gz".format(
-            DUCKDB_VERSION, platform
-        )
+    url = "https://extensions.duckdb.org/v{}/{}/quack.duckdb_extension.gz".format(
+        DUCKDB_VERSION, platform
     )
-    request = urllib.request.Request(
-        url, headers={"User-Agent": "DuckDB/2.0.0"}
-    )
+    request = urllib.request.Request(url, headers={"User-Agent": "DuckDB/2.0.0"})
     with urllib.request.urlopen(request, timeout=60) as response:
         compressed = response.read(MAX_COMPRESSED_BYTES + 1)
     if len(compressed) > MAX_COMPRESSED_BYTES:

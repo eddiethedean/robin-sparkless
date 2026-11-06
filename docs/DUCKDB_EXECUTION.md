@@ -38,7 +38,9 @@ export SPARKLESS_DUCKDB_EXECUTION_OWNER='{"mode":"local","database_path":"./spar
 The server creates the database file if its parent directory exists. A local
 database is owned by one server process. Do not open the same file for writes
 from another process; configure a shared Quack owner when independent clients
-need concurrent access.
+need concurrent access. New local files use DuckDB's v1.5-compatible storage
+format so the documented `duckdb==1.5.1` client can inspect them after the server
+stops.
 
 The execution owner is separate from the 4.19 read-only source configuration
 `SPARKLESS_DUCKDB_SOURCES`. A server may have source aliases as well as an
