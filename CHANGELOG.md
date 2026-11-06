@@ -7,9 +7,20 @@ Review the [compatibility policy](docs/SUPPORT.md) before upgrading across relea
 
 ## [Unreleased]
 
-### Fixed
+## [4.20.0] - 2026-11-06
 
+Candidate release; not yet tagged or published.
+
+### Added
+
+- **Optional DuckDB execution for Spark Connect** — the DuckDB server can run the documented SQL and DataFrame subset in a configured local or shared Quack database. Polars remains the default backend. Typed `CREATE TABLE` and literal `INSERT ... VALUES` writes use durable operation receipts.
+- **DuckDB Connect backend identity** — readiness and capability responses report the selected backend and effective limits; unsupported requests fail explicitly without engine fallback.
 - **Testing schema comparisons** — compare field nullability, metadata when supplied, decimal precision/scale, and nested struct/array/map types in `compare_dataframes()` ([#1746](https://github.com/eddiethedean/robin-sparkless/issues/1746)).
+
+### Changed
+
+- **Bounded DuckDB reads** — serialize writes and receipts, use up to four concurrent read connections and queue at most 16 reads. DuckDB execution remains single-threaded per connection with a 256 MiB connection memory limit.
+- **Connect scheduling and HTTP responses** — avoid unused replay clones, share retained Arrow payloads, yield compute admission while sends are blocked, reuse validated SQL ASTs, and encode final HTTP response bytes on blocking workers.
 
 ## [4.19.0] - 2026-11-05
 

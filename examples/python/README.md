@@ -3,7 +3,7 @@
 Runnable examples for the **Sparkless** Python package. Install first:
 
 ```bash
-pip install "sparkless==4.19.0"
+pip install "sparkless==4.20.0"
 ```
 
 | Script | Description |
@@ -21,14 +21,14 @@ Run scripts:
 ```bash
 python examples/python/basic_usage.py
 python examples/python/sql_and_temp_views.py
-python -m pip install "sparkless[testing]==4.19.0"
+python -m pip install "sparkless[testing]==4.20.0"
 python -m pytest examples/python/test_dual_mode_example.py -v
 ```
 
 Install the base server and its matching Connect client:
 
 ```bash
-python -m pip install "sparkless-server[connect]==4.19.0"
+python -m pip install "sparkless-server[connect]==4.20.0"
 python examples/python/connect_load_query.py --output-dir /tmp/sparkless-connect-output
 ```
 
@@ -46,7 +46,7 @@ Use the adjacent `conftest.py` to activate `sparkless_testing.plugin`. To check
 all pytest examples on real Spark (Java and the appropriate extra required):
 
 ```bash
-python -m pip install "sparkless[testing,pyspark]==4.19.0"
+python -m pip install "sparkless[testing,pyspark]==4.20.0"
 SPARKLESS_TEST_MODE=pyspark python -m pytest examples/python -v -s
 ```
 

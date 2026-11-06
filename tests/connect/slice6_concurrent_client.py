@@ -15,6 +15,7 @@ def main() -> None:
     parser.add_argument("--ready-file", required=True)
     parser.add_argument("--barrier-file", required=True)
     parser.add_argument("--queries", type=int, default=4)
+    parser.add_argument("--rows", type=int, default=10_000_000)
     args = parser.parse_args()
 
     spark = SparkSession.builder.remote(args.url).getOrCreate()
@@ -30,8 +31,9 @@ def main() -> None:
             time.sleep(0.01)
 
         for index in range(args.queries):
-            value = spark.range(10_000_000).filter("id > 5").count()
-            assert value == 9_999_994, value
+            value = spark.range(args.rows).filter("id > 5").count()
+            expected = max(args.rows - 6, 0)
+            assert value == expected, (value, expected)
             print(f"count {index + 1}/{args.queries} passed", flush=True)
             time.sleep(0.05)
     finally:

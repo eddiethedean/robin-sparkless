@@ -8,8 +8,9 @@ for compatibility and deployment scope.
 ## Deployment boundary
 
 Use the packaged native executable or repository-built image on a supported
-platform. In 4.19, choose the base server for standard use or the
-[DuckDB server](DUCKDB_SOURCE.md) for configured read-only table sources.
+platform. Choose the base server for standard use or the
+[DuckDB server](DUCKDB_SOURCE.md) for configured DuckDB sources and its
+optional execution backend.
 Bind both listeners to loopback by default. For remote access, place
 an authenticated TLS proxy/network boundary in front of **both HTTP and gRPC**,
 allow only intended callers, and test gRPC streaming/timeout behavior through
@@ -47,7 +48,7 @@ Use this loopback smoke on a supported server-wheel platform. In one terminal,
 with the virtual environment active:
 
 ```bash
-python -m pip install "sparkless-server==4.19.0"
+python -m pip install "sparkless-server==4.20.0"
 server_bin="$(python -c 'from sparkless_server import executable_path; print(executable_path())')"
 "$server_bin" --version
 "$server_bin" serve --host 127.0.0.1 --port 8099 --disable-connect
@@ -81,6 +82,17 @@ limits. Reject or queue excess work in your application; back off on admission
 failures instead of creating retry storms. Use separate processes for stronger
 workload isolation.
 
+In DuckDB execution mode, one serialized connection owns writes and receipts;
+four read connections can run concurrently and up to 16 more reads queue.
+Connections use one DuckDB thread and a 256 MiB memory limit. The accepted
+load envelope is eight Connect clients plus one paced one-million-row reader
+at an active-operation limit of 16 and a five-second queue timeout. Under that
+workload the release gate requires at least five correct operations/second,
+caps server RSS at 512 MiB, a shared Quack owner's RSS at 256 MiB, short-query
+p95 at five seconds, and health p95 at one second.
+These ceilings describe the tested workload, not arbitrary queries; size the
+host for your own inputs and leave room for the operating system.
+
 ## Shutdown and restart
 
 Stop new traffic, let callers inspect mutation outcomes, then request graceful
@@ -90,12 +102,18 @@ termination signal and allow the configured shutdown grace period before force
 termination. Cooperative work can outlive a response timeout; keep admission
 accounted until native execution returns.
 
-Saved service tables, session views, identities and retained operation records
-are **in memory and lost on restart**. Local library warehouse persistence is a
-separate feature and does not turn the HTTP catalog into durable storage.
-After restart, rehydrate required state and rerun readiness witnesses. Never
-blindly retry a timed-out mutation with a new ID: follow [HTTP recovery](HTTP_API.md).
-There is no durable cross-restart exactly-once guarantee or service backup/restore API.
+In the base server and in DuckDB server Polars mode, managed service tables,
+session views, identities and retained operation records are **in memory and
+lost on restart**. Local library warehouse persistence is a separate feature.
+In DuckDB execution mode, database tables and transactionally written operation
+receipts persist in the configured owner; Connect sessions, temporary state,
+and retained query results do not. Reusing the same user/session/operation
+identity and unchanged request can replay a durable receipt after restart, but
+does not restore the prior session. A local database permits one writable
+Sparkless process; use one shared Quack owner when independent clients need
+concurrent access. After restart, rerun readiness and representative execution
+witnesses before admitting clients. Never blindly retry a timed-out mutation
+under a new ID; follow [Connect replay guidance](DUCKDB_EXECUTION.md#persistence-retries-and-shutdown).
 
 ## Incident checklist
 

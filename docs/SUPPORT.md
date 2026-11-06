@@ -3,7 +3,7 @@
 Sparkless is maintained as an open-source project on a best-effort basis.
 There is no published SLA, paid support commitment, or guaranteed security-fix
 backport schedule. Evaluate your required response and lifecycle guarantees
-before enterprise adoption. The current release is 4.19.0. See the [versioned support matrix](SUPPORT_MATRIX.md).
+before enterprise adoption. The current release is 4.20.0. See the [versioned support matrix](SUPPORT_MATRIX.md).
 
 Use [GitHub Issues](https://github.com/eddiethedean/robin-sparkless/issues) for bugs
 and feature requests. Include package/interpreter/OS/architecture versions,

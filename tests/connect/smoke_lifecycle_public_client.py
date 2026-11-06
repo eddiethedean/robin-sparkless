@@ -30,6 +30,7 @@ def main() -> None:
     first = next(stream)
     assert first.HasField("arrow_batch")
     assert first.arrow_batch.start_offset == 0
+    expected_offset = first.arrow_batch.row_count
     first_response_id = first.response_id
 
     # Closing the transport after the first response simulates losing the live stream.
@@ -61,11 +62,19 @@ def main() -> None:
             timeout=10,
         )
     )
-    assert len(resumed) == 2, resumed
-    assert resumed[0].HasField("arrow_batch")
-    assert resumed[0].arrow_batch.start_offset == 16_384
-    assert resumed[1].HasField("result_complete")
-    assert all(response.operation_id == operation_id for response in resumed)
+    assert resumed, "reattachment should return the remaining stream"
+    complete = False
+    for response in resumed:
+        assert response.operation_id == operation_id
+        if response.HasField("arrow_batch"):
+            assert response.arrow_batch.start_offset == expected_offset, response
+            expected_offset += response.arrow_batch.row_count
+        elif response.HasField("result_complete"):
+            complete = True
+        else:
+            raise AssertionError(f"unexpected response during reattachment: {response}")
+    assert complete, "reattachment should include the operation completion"
+    assert expected_offset == 20_000, expected_offset
 
     resumed_stub.ReleaseExecute(
         base_pb2.ReleaseExecuteRequest(

@@ -6,8 +6,9 @@ DuckDB file and your test uses the PySpark client.
 
 !!! info "Read-only source access"
 
-    Sparkless opens DuckDB sources read-only. Write support is planned for a
-    future release. Polars executes the supported DataFrame operations.
+    Configured DuckDB source aliases are read-only and Polars executes their
+    supported DataFrame operations. The separate 4.20 execution owner supports
+    a bounded write subset; see [DuckDB Connect execution](DUCKDB_EXECUTION.md).
 
 ## Query a local DuckDB file
 
@@ -15,7 +16,7 @@ Install the DuckDB server, its Connect client, and the DuckDB Python package
 used to create the example database.
 
 ```bash
-python -m pip install "sparkless-server-duckdb[connect]==4.19.0" "duckdb==1.5.1"
+python -m pip install "sparkless-server-duckdb[connect]==4.20.0" "duckdb==1.5.1"
 ```
 
 Save as `query_orders.py` and run `python query_orders.py`. The example creates
@@ -107,6 +108,6 @@ local client and send cancellation to the Quack owner. See the
 [development evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md) for the
 standalone, shared-owner, and Spark differential checks.
 
-This page describes the 4.19 read-only source mode. The unreleased 4.20
-candidate's separate writable execution owner and Connect-only query backend
-are described in [DuckDB Connect execution](DUCKDB_EXECUTION.md).
+This page describes the 4.19 read-only source mode, which remains available in
+4.20. Its separate writable execution owner and Connect-only query backend are
+described in [DuckDB Connect execution](DUCKDB_EXECUTION.md).

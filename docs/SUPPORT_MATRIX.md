@@ -1,67 +1,92 @@
-# 4.19.0 support contract
+# 4.20.0 candidate support contract
 
-This page describes the published 4.19.0 products. See the [package and platform matrix](INSTALLATION.md) and [release evidence](RELEASE_EVIDENCE.md).
-
-“Implemented” describes a bounded API, not every Spark semantic or workload.
-“Behavior-tested” means linked regression/example coverage exists. “Unsupported”
-is outside the published contract; “unknown” requires workload validation.
+This candidate defines the proposed public behavior for 4.20.0; the release has
+not been tagged or published. “Implemented” describes a bounded API, not all
+PySpark semantics. “Behavior-tested” means regression or reference coverage
+exists. “Unsupported” is outside the contract; “unknown” requires workload
+validation. See the [package and platform matrix](INSTALLATION.md) and
+[release evidence](RELEASE_EVIDENCE.md).
 
 | Capability | Local Python | Rust embedding | Base server | DuckDB server | Spark Connect |
 | --- | --- | --- | --- | --- | --- |
-| DataFrame filter/project/aggregate/join/window | Implemented, behavior-tested | Implemented, feature/context dependent | SQL allowlist only | Same Polars SQL service surface | [Supported Connect plan subset](SPARK_CONNECT.md#supported-request-surface) for range, inline DataFrames, and configured table sources |
-| SQL queries | SQL enabled in official wheel | Requires `sql` | Bounded SELECT on managed catalog | Bounded SELECT on managed and configured source catalogs | Unsupported SQL commands |
-| Scalar Python UDF | Behavior-tested in withColumn/select/scalar comparison filters | Native expression callbacks, separate API | Unsupported | Unsupported | Unsupported |
+| DataFrame filter/project/aggregate/join/window | Implemented, behavior-tested | Implemented, feature/context dependent | Bounded SQL service only | Polars mode: same as base plus configured sources. DuckDB mode: only the plan subset below | Range, bounded inline data, managed tables, and configured read-only source tables; DuckDB mode adds the plans in [DuckDB execution](DUCKDB_EXECUTION.md) |
+| SQL queries | SQL enabled in the official wheel | Requires `sql` | Bounded SELECT on the managed catalog | Polars mode: bounded SELECT on managed and source catalogs. DuckDB mode: Connect SQL subset; HTTP SQL is disabled | DuckDB mode: one read-only SELECT relation with the documented clauses and functions |
+| CREATE TABLE / INSERT | Local SQL subset | Local SQL subset | Bounded managed-table mutations with operation identity | Polars mode: bounded service mutations. DuckDB mode: typed CREATE TABLE and literal INSERT VALUES through Connect | Mutations are unsupported by default; DuckDB mode accepts the declared DDL/INSERT subset with durable receipts |
+| Scalar Python UDF | Behavior-tested in documented local contexts | Native expression callbacks, separate API | Unsupported | Unsupported | Unsupported |
 | pandas/vectorized/grouped Python UDF, UDTF | Unsupported public API | No equivalent public Python contract | Unsupported | Unsupported | Unsupported |
 | CSV/JSON/Parquet | Implemented | Implemented | No general file IO | No general file IO | Unsupported file sources |
 | Delta | Compiled in default wheel | Requires `delta` | Unsupported | Unsupported | Unsupported |
 | JDBC/SQLite | Requires native feature build | Driver-specific Cargo features | Unsupported | Unsupported | Unsupported |
-| CREATE TABLE / INSERT / database DDL | SQL subset | SQL subset | Bounded mutations with identity | Same bounded mutations | Unsupported commands |
-| Warehouse persistence | Parquet with explicit warehouse config | Same engine mechanism | In-memory service catalog only | In-memory service catalog only | In-memory session/operation state |
-| External catalog provider | Local callback contract | Core provider trait | No general provider configuration contract | No general provider configuration contract | Unsupported |
-| Optional DuckDB table source | Not applicable | `robin-sparkless-duckdb`, optional source feature | Rejects DuckDB source configuration | [Read-only local file or shared Quack owner](DUCKDB_SOURCE.md) configured by the operator | Available through the DuckDB server product |
+| DuckDB table source | Not applicable | Optional source crate | Rejects source configuration | Polars mode reads configured tables; DuckDB mode keeps source aliases read-only and separate from its execution catalog | Named reads from the configured local or shared owner; no source writes |
+| DuckDB execution backend | Not a local-engine mode | Server adapter only | Unsupported | Opt-in; Polars remains the default | Optional, fixed for the server process, with the supported SQL/plan/type subset below |
 | Distributed scheduling / Structured Streaming | Unsupported | Unsupported | Unsupported | Unsupported | Unsupported |
 | Repartition/cache/broadcast hints | Local compatibility behavior; no Spark cluster semantics | Local only | Unsupported | Unsupported | Unsupported |
 
-Do not interpret a name being importable as a behavior guarantee. Runtime stubs
-and no-op hints are called out in [PySpark differences](PYSPARK_DIFFERENCES.md).
-Null ordering, schema inference, decimal/timestamp conversions, exceptions, and
-query plans can differ. Run representative pipelines against the actual Spark
-version used in production, including nulls, empty inputs, invalid data, and types.
+## DuckDB Connect execution limits
 
-Evidence and narrower contracts:
+Enable this backend only in `sparkless-server-duckdb`, with
+`SPARKLESS_EXECUTION_BACKEND=duckdb` and one configured
+`SPARKLESS_DUCKDB_EXECUTION_OWNER`. The server reports the active backend in
+readiness and capabilities. An unsupported operation fails explicitly; it is
+never retried in Polars. The base product has no DuckDB/Quack payload.
 
-- The optional DuckDB **execution** adapter is present in the unreleased 4.20
-  source candidate and is not included in the 4.19.0 support matrix above.
-  Its frozen implementation subset and startup config are in the
-  [candidate guide](DUCKDB_EXECUTION.md); Spark 4.0.5 semantic validation
-  (V37), owner/write lifecycle validation (V38), and exact-artifact release
-  checks remain open.
+The declared Connect subset includes `range`, bounded scalar `LocalRelation`,
+configured tables, aliases, projection, supported scalar filters, `limit`,
+inner equality joins (including `USING`), `CROSS JOIN` in SQL, grouped
+`count`/`sum`, and the documented read-only SQL expressions and clauses. Writes
+are limited to explicitly typed `CREATE TABLE` and literal
+`INSERT INTO ... VALUES`. Timestamp and decimal string values may use the
+documented explicit casts. CTEs, ordering, windows, `DISTINCT`, CTAS,
+insert-from-select, DataFrame writers, temp views, parameterized SQL, UDFs,
+nested result types, and general Spark SQL are unsupported. See the full
+[request and type matrix](DUCKDB_EXECUTION.md#supported-request-subset).
 
-- The 4.19 DuckDB source is packaged by `sparkless-server-duckdb` and enabled by
-  trusted `SPARKLESS_DUCKDB_SOURCES` configuration. The `duckdb-source` feature
-  belongs to the Polars adapter crate and is not exposed by the base product.
-  Public smoke and reference cases cover BOOLEAN,
-  SMALLINT, INT, BIGINT (including integer extrema and non-null schema), finite
-  DOUBLE, STRING, DATE, UTC microsecond TIMESTAMP,
-  and exact decimal values at `DECIMAL(1,0)`, `(9,0)`, `(18,6)`, `(38,0)`, and
-  `(38,38)`. These exercise low, intermediate, maximum precision, and maximum
-  scale boundaries; they do not compare every valid precision/scale pair.
-  Nested/unsigned values, non-finite DOUBLEs, writes, cross-owner joins, and
-  arbitrary Connect SQL are rejected or unsupported. See the
-  [4.19 source contract](plans/sparkless-server/RELEASE_4_19.md#duckdb-source-contract)
-  and [candidate evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md).
-- See [release evidence](RELEASE_EVIDENCE.md) for published packages and
-  [4.19 development evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md)
-  for the scope and revisions of cross-platform and resource measurements.
-  Installed DuckDB wheels resolve the bundled Quack extension beside the server
-  executable when `extension_path` is omitted.
+The backend is single-node. The local owner permits one writable server process
+per database file. Shared access uses the matching Quack extension and a
+configured shared owner. A local database file must not be opened for writes by
+another process while Sparkless owns it.
 
-- [Generated compatibility inventory](PARITY_STATUS.md): counts and oracle provenance, not a parity percentage.
-- [Executable examples](https://github.com/eddiethedean/robin-sparkless/tree/main/examples/python): backend identity, pipeline, UDF.
-- [UDF contexts](UDF_GUIDE.md), [catalog lifetime](PERSISTENCE_GUIDE.md), [external providers](EXTERNAL_CATALOGS.md).
-- [HTTP reference](HTTP_API.md) and [Connect type/lifecycle matrix](SPARK_CONNECT.md).
-- [Distribution features](INSTALLATION.md), [release evidence](RELEASE_EVIDENCE.md).
+| Enforced or accepted limit | Value |
+| --- | ---: |
+| Write/receipt connections | 1 serialized connection |
+| Concurrent read connections / queued reads | 4 / 16 |
+| DuckDB execution threads / memory limit | 1 thread / 256 MiB per connection |
+| `range` rows | 1,000,000 |
+| LocalRelation rows / encoded IPC / decoded bytes | 10,000 / 1 MiB / 8 MiB |
+| Arrow output rows / IPC bytes per batch | 16,384 / 1 MiB |
+| Durable operation receipts | 1,000,000 |
+| Accepted 8-client load with one paced reader | 60 seconds, 1,000,000 rows, active limit 16, 5-second queue timeout |
+| Server process RSS / shared Quack owner RSS under that workload | 512 MiB / 256 MiB |
+| Correct throughput / short-query p95 / health p95 under that workload | at least 5 ops/s / 5 seconds / 1 second |
 
-Unlisted APIs and combinations have **unknown** coverage; do not infer support
-from older plans or PySpark documentation. Open a minimal compatibility issue or
-add an oracle regression before relying on them.
+The RSS and latency values are acceptance ceilings for the measured workload,
+not universal capacity promises. Server and owner RSS are measured separately
+for Quack; local-owner memory is included in server RSS. Raise instance limits
+only after testing your workload and keeping health, queue, cancellation, and
+shutdown behavior within these ceilings.
+
+## Compatibility and evidence
+
+The Connect adapter targets the pinned Spark Connect 4.0.5 protocol. Result
+values and schemas were compared with an unmodified Spark 4.0.5 client and
+reference server for the published matrix. Null ordering, casts, timestamps,
+decimals, exceptions, and query plans can differ outside that matrix. Compare
+representative values and schemas with the Spark version used in production.
+
+The optional DuckDB **source** mode remains read-only and feeds supported
+transformations to Polars. It is distinct from the DuckDB **execution** mode,
+which runs declared plans inside DuckDB and accepts the bounded writes above.
+Read [the 4.19 source contract](DUCKDB_SOURCE.md) and [4.20 execution guide](DUCKDB_EXECUTION.md)
+before selecting a mode.
+
+Other boundaries:
+
+- [PySpark differences](PYSPARK_DIFFERENCES.md) lists local API gaps and
+  compatibility behavior; an importable symbol is not a behavior guarantee.
+- [Generated compatibility inventory](PARITY_STATUS.md) records counts and
+  oracle provenance, not a parity percentage.
+- [UDF contexts](UDF_GUIDE.md), [catalog lifetime](PERSISTENCE_GUIDE.md),
+  [external providers](EXTERNAL_CATALOGS.md), [HTTP reference](HTTP_API.md),
+  and [Connect lifecycle/type limits](SPARK_CONNECT.md) define narrower APIs.
+- Unlisted APIs and combinations have **unknown** coverage. Add an oracle
+  regression or a reproducible issue before relying on them.

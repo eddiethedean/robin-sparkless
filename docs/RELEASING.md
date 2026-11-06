@@ -75,6 +75,13 @@ exercises each product through its `sparkless` convenience extra. DuckDB source
 checks run only with the DuckDB product and include standalone/live-Quack
 smokes, a locked Spark differential, remote cancellation during shutdown, and
 three slow-reader resource rounds at each measured size on both server platforms.
+The 4.20.0 candidate adds exact-wheel backend selection, Spark 4.0.5
+result/schema differential, typed write/replay, owner restart,
+commit-storage-failure, packaged sync/async Connect lifecycle checks, and
+local/Quack paced-reader resource checks on Linux x86_64 and macOS arm64. The
+candidate also compares packaged HTTP and Connect scheduling performance with
+the published 4.19.0 base server. These checks are part of required release
+acceptance; they do not publish a branch candidate.
 
 Base and DuckDB Linux servers are compiled in separate target directories. Each
 container copies the exact executable from its tested wheel, then checks its

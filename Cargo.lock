@@ -5691,7 +5691,7 @@ dependencies = [
 
 [[package]]
 name = "robin-sparkless"
-version = "4.19.0"
+version = "4.20.0"
 dependencies = [
  "chrono",
  "criterion",
@@ -5710,7 +5710,7 @@ dependencies = [
 
 [[package]]
 name = "robin-sparkless-core"
-version = "4.19.0"
+version = "4.20.0"
 dependencies = [
  "chrono",
  "serde",
@@ -5721,7 +5721,7 @@ dependencies = [
 
 [[package]]
 name = "robin-sparkless-delta"
-version = "4.19.0"
+version = "4.20.0"
 dependencies = [
  "buoyant_kernel_derive",
  "deltalake",
@@ -5732,7 +5732,7 @@ dependencies = [
 
 [[package]]
 name = "robin-sparkless-duckdb"
-version = "4.19.0"
+version = "4.20.0"
 dependencies = [
  "arrow 60.1.0",
  "duckdb",
@@ -5743,14 +5743,14 @@ dependencies = [
 
 [[package]]
 name = "robin-sparkless-jdbc"
-version = "4.19.0"
+version = "4.20.0"
 dependencies = [
  "robin-sparkless-core",
 ]
 
 [[package]]
 name = "robin-sparkless-jdbc-polars"
-version = "4.19.0"
+version = "4.20.0"
 dependencies = [
  "chrono",
  "futures-util",
@@ -5770,7 +5770,7 @@ dependencies = [
 
 [[package]]
 name = "robin-sparkless-plan"
-version = "4.19.0"
+version = "4.20.0"
 dependencies = [
  "robin-sparkless-core",
  "serde",
@@ -5779,7 +5779,7 @@ dependencies = [
 
 [[package]]
 name = "robin-sparkless-polars"
-version = "4.19.0"
+version = "4.20.0"
 dependencies = [
  "aes-gcm",
  "arrow-array 57.2.0",
@@ -5833,7 +5833,7 @@ dependencies = [
 
 [[package]]
 name = "robin-sparkless-sql"
-version = "4.19.0"
+version = "4.20.0"
 dependencies = [
  "robin-sparkless-core",
  "robin-sparkless-plan",
@@ -6324,7 +6324,7 @@ dependencies = [
 
 [[package]]
 name = "spark-sql-parser"
-version = "4.19.0"
+version = "4.20.0"
 dependencies = [
  "sqlparser 0.61.0",
  "thiserror 2.0.18",
@@ -6332,7 +6332,7 @@ dependencies = [
 
 [[package]]
 name = "sparkless-native"
-version = "4.19.0"
+version = "4.20.0"
 dependencies = [
  "base64 0.22.1",
  "polars",
@@ -6347,7 +6347,7 @@ dependencies = [
 
 [[package]]
 name = "sparkless-server"
-version = "4.19.0"
+version = "4.20.0"
 dependencies = [
  "serde_json",
  "sparkless-server-connect",
@@ -6359,7 +6359,7 @@ dependencies = [
 
 [[package]]
 name = "sparkless-server-connect"
-version = "4.19.0"
+version = "4.20.0"
 dependencies = [
  "bytes",
  "http",
@@ -6383,7 +6383,7 @@ dependencies = [
 
 [[package]]
 name = "sparkless-server-core"
-version = "4.19.0"
+version = "4.20.0"
 dependencies = [
  "robin-sparkless-core",
  "robin-sparkless-sql",
@@ -6392,7 +6392,7 @@ dependencies = [
 
 [[package]]
 name = "sparkless-server-duckdb"
-version = "4.19.0"
+version = "4.20.0"
 dependencies = [
  "sparkless-server-connect",
  "sparkless-server-core",
@@ -6403,7 +6403,7 @@ dependencies = [
 
 [[package]]
 name = "sparkless-server-http"
-version = "4.19.0"
+version = "4.20.0"
 dependencies = [
  "bytes",
  "http-body-util",
@@ -6416,7 +6416,7 @@ dependencies = [
 
 [[package]]
 name = "sparkless-server-polars"
-version = "4.19.0"
+version = "4.20.0"
 dependencies = [
  "bytes",
  "http",
@@ -6447,7 +6447,7 @@ dependencies = [
 
 [[package]]
 name = "sparkless-server-runtime"
-version = "4.19.0"
+version = "4.20.0"
 dependencies = [
  "robin-sparkless-core",
  "serde_json",

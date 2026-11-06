@@ -1,9 +1,8 @@
 //! DuckDB-enabled Sparkless server product.
 //!
-//! The published 4.19 product defaults to Polars execution and adds the read-only DuckDB
-//! catalog source. The 4.20 candidate can select the optional DuckDB Connect execution
-//! adapter with trusted startup configuration. HTTP/Connect transports, replay, and admission
-//! remain shared with the base product.
+//! The 4.20 product defaults to Polars execution and adds read-only DuckDB catalog sources.
+//! Trusted startup configuration can select the optional DuckDB Connect execution adapter.
+//! HTTP/Connect transports, replay, and admission remain shared with the base product.
 
 pub use sparkless_server_polars::*;
 

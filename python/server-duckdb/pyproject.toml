@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sparkless-server-duckdb"
-version = "4.19.0"
-description = "Platform-specific Polars server with optional DuckDB source support"
+version = "4.20.0"
+description = "Platform-specific server with DuckDB sources and optional Connect execution"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-dependencies = ["sparkless-connect==4.19.0"]
+dependencies = ["sparkless-connect==4.20.0"]
 
 [project.optional-dependencies]
 connect = ["pyspark-client==4.0.5"]

@@ -1,7 +1,7 @@
 # Python testing API
 
-Install `sparkless[testing]==4.19.0` for local tests or
-`sparkless-testing==4.19.0` if you manage the engine installation separately.
+Install `sparkless[testing]==4.20.0` for local tests or
+`sparkless-testing==4.20.0` if you manage the engine installation separately.
 Use `pytest_plugins = ["sparkless_testing.plugin"]` in the suite's root
 `conftest.py`. The package resolves the selected engine when called.
 
@@ -41,10 +41,9 @@ the expected columns even when `data=[]`; this is useful for checking an empty
 result. A mapping that omits schema information cannot assert those omitted
 schema properties. The implementation addresses [#1746](https://github.com/eddiethedean/robin-sparkless/issues/1746).
 
-The published `sparkless-testing==4.19.0` artifact still contains the reported
-bug. The corrected source is part of the unreleased 4.20 candidate; use it from
-the repository or wait for the corrected package version before relying on
-these comparisons for schema parity.
+The published `sparkless-testing==4.19.0` artifact contains the reported bug.
+Version 4.20.0 fixes it; install that release before relying on these
+comparisons for schema parity.
 
 ```python
 from sparkless_testing import assert_dataframes_equal, assert_rows_equal

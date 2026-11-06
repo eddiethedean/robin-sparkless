@@ -6,20 +6,20 @@ Python users should start with [the Python guide](python_getting_started.md).
 
 ## Install
 
-The 4.19.0 crates require Rust 1.93 or newer. The repository pins
-[Rust 1.93.1](https://github.com/eddiethedean/robin-sparkless/blob/v4.19.0/rust-toolchain.toml).
+The 4.20.0 crates require Rust 1.93 or newer. The repository pins
+[Rust 1.93.1](https://github.com/eddiethedean/robin-sparkless/blob/v4.20.0/rust-toolchain.toml).
 
 ```bash
 cargo new sparkless-demo
 cd sparkless-demo
-cargo add robin-sparkless@=4.19.0
+cargo add robin-sparkless@=4.20.0
 ```
 
 Or add the dependency to an existing application's `Cargo.toml`:
 
 ```toml
 [dependencies]
-robin-sparkless = "=4.19.0"
+robin-sparkless = "=4.20.0"
 ```
 
 ## Create and filter a DataFrame
@@ -93,7 +93,7 @@ example:
 
 ```toml
 [dependencies]
-robin-sparkless = { version = "=4.19.0", features = ["sql", "delta"] }
+robin-sparkless = { version = "=4.20.0", features = ["sql", "delta"] }
 ```
 
 | Feature | Capability |

@@ -65,27 +65,24 @@ finally:
 
 </div>
 
-## New in 4.19.0
+## 4.20.0 candidate
 
-- **Own a server and a session together.** `SparklessConnect` starts the native
-  server and creates a fresh PySpark Connect session in one `with` block.
-  [Start a session](SPARK_CONNECT.md#start-a-server-and-session)
-- **Read DuckDB test data.** The optional DuckDB server exposes configured
-  tables as read-only sources and runs supported transformations in Polars.
-  [Query a DuckDB file](DUCKDB_SOURCE.md)
-- **Install the components you use.** The base server, DuckDB server, shared
-  launcher, and pytest helpers are separate packages.
-  [Compare the packages](INSTALLATION.md#choose-a-package) ·
-  [Upgrade from 4.18](python_migration.md#from-sparkless-418-to-419)
+- **Execute Connect plans in DuckDB.** Opt in on the separate DuckDB server;
+  Polars remains the default and unsupported plans fail explicitly.
+  [Execution guide](DUCKDB_EXECUTION.md) · [migration notes](MIGRATION_4_20.md)
+- **Compare schemas fully.** `sparkless-testing` now checks nullability,
+  metadata, decimals, nested types, and declared schemas for empty results.
+  [Testing comparison contract](TESTING_PYTHON_API.md#comparison-semantics)
+- **Improve bounded server work.** HTTP response encoding and Connect scheduling
+  reduce avoidable copies and keep health work progressing during blocked sends.
+  [Performance guide](PERFORMANCE.md)
 
-## Unreleased 4.20 source candidate
+## Package layout introduced in 4.19
 
-The repository now contains an optional DuckDB Connect execution path and
-performance/schema-comparison fixes planned for 4.20.0. The public packages
-remain at 4.19.0: Spark-result conformance, owner/restart behavior, performance
-measurements, and release artifact checks are still open. Review the
-[candidate execution guide](DUCKDB_EXECUTION.md) and [phase plan](plans/sparkless-server/15-duckdb-connect-backend.md);
-do not infer these capabilities from the published install.
+`SparklessConnect` starts the native server and creates a fresh PySpark Connect
+session in one `with` block. The base server, DuckDB server, shared launcher,
+and pytest helpers are separate packages. See [server sessions](SPARK_CONNECT.md#start-a-server-and-session),
+[DuckDB sources](DUCKDB_SOURCE.md), and the [package matrix](INSTALLATION.md#choose-a-package).
 
 ## What to check before adopting Sparkless
 

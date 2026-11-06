@@ -1,6 +1,6 @@
 [package]
 name = "sparkless-server-connect"
-version = "4.19.0"
+version = "4.20.0"
 edition = "2024"
 rust-version = "1.93"
 description = "Spark Connect gRPC transport for Sparkless server runtimes"
@@ -14,9 +14,9 @@ http-body = "1"
 prost = "=0.14.4"
 prost-reflect = "=0.16.5"
 prost-types = "=0.14.4"
-robin-sparkless-core = { version = "4.19.0", path = "../robin-sparkless-core" }
-sparkless-server-core = { version = "4.19.0", path = "../sparkless-server-core" }
-sparkless-server-runtime = { version = "4.19.0", path = "../sparkless-server-runtime" }
+robin-sparkless-core = { version = "4.20.0", path = "../robin-sparkless-core" }
+sparkless-server-core = { version = "4.20.0", path = "../sparkless-server-core" }
+sparkless-server-runtime = { version = "4.20.0", path = "../sparkless-server-runtime" }
 serde_json = "1.0"
 tokio-stream = "0.1.19"
 tokio = { version = "1.53.3", features = ["io-util", "sync", "time"] }

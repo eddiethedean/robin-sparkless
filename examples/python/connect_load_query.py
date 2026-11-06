@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Load a CSV through Spark Connect, query it, and export the returned rows.
 
-Install sparkless-server[connect]==4.19.0.
+Install sparkless-server[connect]==4.20.0.
 CSV parsing and JSON export happen in Python; DataFrame queries run on the server.
 """
 

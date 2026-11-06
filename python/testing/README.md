@@ -24,6 +24,6 @@ nested struct/array/map fields. An expected mapping can declare `schema` and an
 empty `data` list. See the
 [comparison API contract](https://robin-sparkless.readthedocs.io/en/latest/TESTING_PYTHON_API/#comparison-semantics).
 
-The published 4.19.0 package still has the schema comparison defect in
-[#1746](https://github.com/eddiethedean/robin-sparkless/issues/1746); use the
-4.20 source candidate or the corrected package once it is released.
+The published 4.19.0 package had the schema comparison defect in
+[#1746](https://github.com/eddiethedean/robin-sparkless/issues/1746). Version
+4.20.0 fixes it; use the current package for schema-sensitive comparisons.

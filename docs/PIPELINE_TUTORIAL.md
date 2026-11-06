@@ -33,7 +33,7 @@ application needs it. Null/invalid values need a separate rejection policy.
 ## Run and inspect
 
 ```bash
-python -m pip install "sparkless[testing]==4.19.0"
+python -m pip install "sparkless[testing]==4.20.0"
 SPARKLESS_TEST_MODE=sparkless python -m pytest test_pipeline_example.py -v
 ```
 
@@ -54,12 +54,12 @@ In a separate Python environment with Java 17, install the test plugin and
 the reference runtime. Run from the same example directory.
 
 ```bash
-python -m pip install "sparkless[testing,pyspark]==4.19.0"
+python -m pip install "sparkless[testing,pyspark]==4.20.0"
 SPARKLESS_TEST_MODE=pyspark python -m pytest test_pipeline_example.py -v
 ```
 
 Expect one passing test in each environment. For Spark 4, use
-`sparkless[testing,pyspark4]==4.19.0` in another environment and set
+`sparkless[testing,pyspark4]==4.20.0` in another environment and set
 `SPARKLESS_PYSPARK_COMPAT=4.0` alongside `SPARKLESS_TEST_MODE=pyspark`.
 The separate [backend identity example](https://github.com/eddiethedean/robin-sparkless/blob/main/examples/python/test_dual_mode_example.py)
 can also verify that the reference session has a live JVM.

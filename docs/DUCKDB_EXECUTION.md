@@ -1,33 +1,16 @@
-# DuckDB Connect execution (4.20 candidate)
+# DuckDB Connect execution (4.20.0 candidate)
 
-This page documents the source implementation for the unreleased 4.20.0 candidate.
-It is not part of the published 4.19.0 support contract. On macOS arm64, the
-pinned Spark 4.0.5 differential passes 44 result/schema cases and rejects 20
-unsupported forms. Release-profile local-owner and Quack runs complete paced
-one-million-row reads at active_operations=16. The original V38 runs exposed a
-5-second send-stall timeout and long small-query waits behind a slow result
-consumer. The candidate gives network backpressure 30 seconds to replenish
-HTTP/2 send credit and uses a bounded pool of independent read connections.
-Quack small-count p99 fell from 27.75 seconds to 167 ms in the measured cohort.
-V38 capacity budgets, cross-platform and arbitrary partial-I/O recovery, and
-exact 4.20.0 artifact checks remain open. These local candidate results are not
-production certification.
+The optional `sparkless-server-duckdb` candidate runs the documented Spark
+Connect SQL and DataFrame subset in DuckDB. Polars remains the default backend.
+This is a single-node service, not a general Spark replacement. The 4.20.0
+release has not been tagged or published. Check the [candidate support
+contract](SUPPORT_MATRIX.md) and [release evidence](RELEASE_EVIDENCE.md) before
+enabling it.
 
-Release-profile local builds pass startup selection, public DuckDB execution,
-write reattachment/replay, Quack owner-loss recovery, and the pinned V37
-differential. Both server products were also built into local macOS wheels and
-passed isolated install checks. Their embedded executables are local builds;
-the wheels still carry the repository's 4.19.0 version metadata, so they are
-packaging smoke evidence rather than 4.20.0 artifacts. The [local release
-summary](plans/sparkless-server/evidence/phase-420-release-profile-local-summary.json)
-records the binary, report, and wheel hashes.
-
-Additional local evidence now covers isolated performance attribution for
-420-07–420-11 and graceful shutdown cancellation of an active Quack-backed
-Connect query. One p50 pair exceeded its per-pair guardrail for #1739 and for
-the #1741 Arrow-sharing workload; neither result repeated within its paired
-run set. See the [Phase 4.20 evidence notes](plans/sparkless-server/15-duckdb-connect-backend.md#isolated-performance-attribution)
-for the measurements and limits.
+The adapter targets the unmodified Spark Connect 4.0.5 client and an Apache
+Spark 4.0.5 reference. Unsupported operations fail explicitly; they never fall
+back to Polars. The release contract lists tested result/schema cases,
+unsupported operations, packaged platforms, and measured operating limits.
 
 The optional `sparkless-server-duckdb` product can run supported Spark Connect
 plans in DuckDB and store typed tables in one configured DuckDB owner. The
@@ -36,8 +19,16 @@ server process and its sessions use one backend for their lifetime.
 
 ## Start with a local database
 
-Build or install the DuckDB server with Spark Connect enabled. Point the
-execution owner at a persistent database file:
+Install the DuckDB server with its Spark Connect client extra and the
+standalone DuckDB client used to inspect the database:
+
+```sh
+python -m pip install \
+  "sparkless-server-duckdb[connect]==4.20.0" \
+  "duckdb==1.5.1"
+```
+
+Point the execution owner at a persistent database file:
 
 ```sh
 export SPARKLESS_EXECUTION_BACKEND=duckdb
@@ -52,6 +43,23 @@ need concurrent access.
 The execution owner is separate from the 4.19 read-only source configuration
 `SPARKLESS_DUCKDB_SOURCES`. A server may have source aliases as well as an
 execution database, but source aliases are not writable through Connect.
+
+Save this as `run_duckdb.py` and run it in the same shell where the environment
+variables are set:
+
+```python
+from sparkless_server_duckdb import SparklessConnect
+
+with SparklessConnect() as spark:
+    spark.sql("CREATE TABLE events (id BIGINT, label VARCHAR)").collect()
+    spark.sql("INSERT INTO events VALUES (1, 'started'), (2, 'finished')").collect()
+    rows = sorted((row.id, row.label) for row in spark.table("events").collect())
+    assert rows == [(1, "started"), (2, "finished")]
+```
+
+After the context exits, inspect the local database with a separate DuckDB
+process or client. Do not open a local database for writes while Sparkless owns
+it.
 
 ## Use a shared Quack owner
 
@@ -88,10 +96,10 @@ mode, read connections attach independently to the configured owner. A
 successful write invalidates pooled reads so later queries see the committed
 catalog and data. Quack connection failures also invalidate pooled reads.
 
-These pool sizes are fixed candidate limits, not user-configurable values or an
-accepted production capacity guarantee. Slow network sends do not retain the
-only connection available for unrelated reads, but the server still needs a
-measured memory and latency budget for the configured workload.
+These pool sizes are fixed limits, not user-configurable values. Slow network
+sends do not retain the only connection available for unrelated reads. The
+accepted 8-client workload envelope and its RSS, queue, health, and latency
+ceilings are listed in the [support contract](SUPPORT_MATRIX.md#duckdb-connect-execution-limits).
 
 ## Supported request subset
 
@@ -157,90 +165,65 @@ capability routes remain available when the HTTP listener is enabled.
 
 ## Resource and lifecycle limits
 
-The adapter enforces a 1,000,000-row `range` cap, bounded LocalRelation Arrow
-input whose declared schema must match its Arrow schema (rows, encoded bytes,
-and decoded bytes are also bounded), and batches of at most 16,384
-rows or 1 MiB of Arrow IPC. Existing server admission, response, session, and
-replay limits continue to apply. The primary connection and each pooled read
-connection use one DuckDB execution thread and a 256 MiB memory limit per
-connection; these settings do not bound aggregate or other process-level
-allocation.
+The adapter enforces a 1,000,000-row `range` cap, LocalRelation input caps of
+10,000 rows, 1 MiB encoded Arrow IPC and 8 MiB decoded data, and output batches
+of at most 16,384 rows or 1 MiB. Each DuckDB connection uses one execution
+thread and a 256 MiB memory limit. The one write connection, four read
+connections, and 16 queued reads are fixed server limits. Existing Connect
+admission, response, session, and replay limits also apply.
 
-Tables and operation receipts persist in the configured database. Connect
-sessions, temporary state, and retained Arrow results are server-instance
-scoped. The receipt table survives a server restart, but that alone does not
-restore the prior Connect session or make an old operation reattachable.
-Local-owner and file-backed Quack smokes verified that resubmitting the
-unchanged write request under the same user, session, and operation identity
-after server restart replays its durable receipt. A changed request under that
-identity is rejected without effects. These local cases do not establish
-behavior across all Quack deployments or release artifacts. If commit
-acknowledgement is lost, the live server reports an unknown outcome until the
-receipt can be consulted. A local POSIX `RLIMIT_FSIZE` fault makes DuckDB return
-`File too large` while writing a 32 MiB transaction WAL at COMMIT; Sparkless
-reports the outcome as unknown. The [local fault report](plans/sparkless-server/evidence/phase-420-duckdb-storage-commit-fault-local.json)
-records the command and recovery result: reopening found zero rows and zero
-receipts, with no partial payload. That result applies to this injected
-`RLIMIT_FSIZE` fault only. Cross-platform behavior, other partial-I/O recovery,
-and receipt reconciliation remain V38 release checks.
+| Accepted operating limit | Value |
+| --- | ---: |
+| Workload | 8 Connect clients plus one paced 1,000,000-row reader |
+| Active operations / queue timeout | 16 / 5 seconds |
+| Minimum correct throughput | 5 operations per second |
+| Server peak RSS | 512 MiB |
+| Shared Quack owner peak RSS | 256 MiB |
+| Short-query p95 / health p95 | 5 seconds / 1 second |
+| Rejections and health errors | 0 during the accepted workload |
+| Graceful server and owner shutdown | Exit code 0 |
 
-The V38 load matrix used a 5-second queue timeout, one-million-row counts and
-slow readers, 100,000-row collects, and 60-second 1/4/8/16-client cohorts.
-Reattachable runs covered active limits 2/4/8 against both a local owner and a
-separate file-backed Quack owner. Each owner mode recorded 25, 19, and 10
-admission rejections at limits 2, 4, and 8, respectively. Rejections begin at
-four clients at limits 2/4 and at eight clients at limit 8. Only the reattachable
-active-8 cohorts with 1/4 clients had no rejections; that is a one-host candidate
-observation, not a release support guarantee. The non-reattachable
-mode was measured against both owners at active limits 2/4/8; the original 5-second
-send watchdog stalled paced readers in every tested limit. A direct release-profile
-repro reached 765,952 rows before the server deadline, while a no-pause control read
-all 1,000,000 rows. A gRPC trace showed that the client replenished HTTP/2 send credit
-in a delayed batch, after the old watchdog had expired. The local fix separates the
-30-second network send-stall allowance from the 5-second reattachable response-ACK
-deadline. With the fix, the local and Quack release-profile 8-client/active-16 runs
-completed both concurrent and final non-reattachable readers with one million rows,
-zero capacity rejections, clean health probes, and graceful shutdown. An active-8
-run rejected its ninth concurrent operation at the configured compute queue timeout,
-while the final standalone reader passed. See the [post-fix V38 report](plans/sparkless-server/evidence/phase-420-duckdb-v38-backpressure-release-local-summary.json)
-and the [pre-fix matrix](plans/sparkless-server/evidence/phase-420-duckdb-v38-load-local-summary.json).
-These measurements close the reproduced send-stall defect on this host, not the V38
-capacity or supported-platform gates. HTTP SQL probes are
-omitted because DuckDB mode intentionally rejects SQL over HTTP.
+The RSS, throughput, and latency limits are measured acceptance ceilings for
+that workload, not promises for arbitrary SQL, data shapes, or Quack deployments.
+Local-owner memory is included in server RSS; Quack owner RSS is sampled
+separately. A full read pool or compute queue returns a capacity error rather
+than growing without bound. Network sends allow up to 30 seconds for HTTP/2
+credit to replenish; reattachable response acknowledgements have a separate
+5-second deadline. See the [support contract](SUPPORT_MATRIX.md#duckdb-connect-execution-limits)
+for the full product boundary.
 
-The bounded read pool was added after an active-16 Quack run showed short queries
-waiting up to 27.75 seconds while a non-reattachable reader was blocked sending
-its result. With the pool, the final release-profile cohorts recorded 80.3 ops/s
-and 153 ms short-job p99 for the local owner, and 79.2 ops/s and 160 ms
-short-job p99 for Quack. Quack small-count p99 was 167 ms, 99.4% below the
-pre-pool run's 27.75 seconds. Both cohorts completed the concurrent and final
-one-million-row readers with no capacity rejections and graceful shutdown. The
-Quack server and fixture owner peaked at 116 MB and 66.8 MB RSS. These are local
-measurements without an accepted latency or memory budget; raw reports and the
-calculation are in the [read-pool summary](plans/sparkless-server/evidence/phase-420-duckdb-v38-read-pool-local-summary.json).
+## Persistence, retries, and shutdown
 
-The shared Quack smoke now kills the owner after the first batch of a 1M-row
-reattachable result stream. The result completes, HTTP health remains ready, and
-an independent client sees the committed data after owner restart. The first
-Connect query in the old session after restart reports `Invalid connection id`;
-one retry in the same session succeeds. A separate release-profile Quack probe
-kept a paced million-row stream active while four concurrent Connect reads were
-submitted; all four failed against the lost owner, health stayed ready, and the
-reads recovered after owner restart. See the [mixed-load lifecycle report](plans/sparkless-server/evidence/phase-420-quack-execution-final-release-local.json).
-This is one-host evidence. Other partial-I/O recovery cases, release/cleanup
-acceptance, and cross-platform/package checks remain open.
+Tables and operation receipts persist in the configured database. A receipt is
+committed in the same transaction as its write and is capped at 1,000,000
+entries. Repeating a write with the same user, session, operation identity, and
+request replays the stored outcome without reapplying it. Reusing an identity
+with changed request content is rejected. When commit outcome is unknown, retain
+the original request and identity; do not retry with a new identity until the
+outcome is resolved.
 
-## Status and release gates
+Connect sessions, temporary state, and retained Arrow results belong to one
+server instance and do not survive its restart. A durable receipt does not
+restore the old session. In local mode, one Sparkless process owns the database
+for writes; do not open the same file for writes in another process. Use one
+shared Quack owner when independent clients need concurrent access. Cancellation
+and graceful shutdown keep producer ownership until the query has stopped.
 
-Read the [phase 4 plan](plans/sparkless-server/15-duckdb-connect-backend.md)
-and [4.20 roadmap](plans/sparkless-server/ROADMAP.md). The local V37 report
-records 44 result/schema comparisons and 20 explicit rejections against Spark
-4.0.5. The original shared-owner and local-owner load matrices expose timeouts
-at lower active limits; the final active-16 read-pool cohorts pass on this host.
-The supported capacity envelope must still be resolved and accepted.
-V38 also needs cross-platform storage-failure evidence, recovery checks for other
-partial-I/O failures, repeat mixed-load owner-loss acceptance on supported
-platforms, complete release/cleanup, and resource-budget acceptance. Exact
-release artifacts and supported-platform package checks remain pending. Until the final reports are linked from
-[release evidence](RELEASE_EVIDENCE.md), the 4.19.0 install instructions and
-support matrix remain authoritative.
+## Security and deployment
+
+Bind listeners to loopback unless an authenticated TLS proxy or equivalent
+network boundary protects both HTTP and gRPC. Connect session IDs are not
+credentials. The DuckDB server does not accept paths, extension names, or
+credentials from a Connect request. Keep Quack tokens in a secret manager and
+restrict their owner permissions. See the [production runbook](PRODUCTION.md)
+for listener, identity, process, and shutdown guidance.
+
+## Validation evidence
+
+The release candidate is checked from its built Linux x86_64 and macOS arm64
+server wheels. Validation includes the pinned Spark 4.0.5 result/schema matrix,
+explicit unsupported requests, local and Quack owner lifecycle, transactional
+replay, storage-failure classification, HTTP/Connect performance comparisons,
+and the operating envelope above. See [release evidence](RELEASE_EVIDENCE.md)
+and the [Phase 4.20 plan](plans/sparkless-server/15-duckdb-connect-backend.md)
+for the exact revisions, reports, and known limits.

@@ -15,6 +15,7 @@ from run_slice8_benchmarks import (
     phase_trace_summary,
     redacted_execution_backend_environment,
     percentile,
+    require_candidate_without_capacity_rejections,
     server_configuration,
 )
 from run_slice8_proxy_route import require_sc_url
@@ -120,6 +121,33 @@ class Slice8HarnessTests(unittest.TestCase):
             )["diagnostic"],
             "Connect response stream stalled without progress",
         )
+
+    def test_paired_candidate_rejections_fail_even_when_baseline_rejections_are_allowed(
+        self,
+    ) -> None:
+        require_candidate_without_capacity_rejections(
+            {"capacity_rejection_count": 0, "cohorts": []}, pair=1
+        )
+        with self.assertRaisesRegex(
+            RuntimeError, "paired candidate 2 had 1 capacity rejection"
+        ):
+            require_candidate_without_capacity_rejections(
+                {
+                    "capacity_rejection_count": 1,
+                    "cohorts": [
+                        {
+                            "capacity_rejections": [
+                                {
+                                    "source": "slow_reader",
+                                    "diagnostic": "response stream stalled",
+                                }
+                            ]
+                        }
+                    ],
+                    "slow_reader": {"capacity_rejection": None},
+                },
+                pair=2,
+            )
 
     def test_progress_monitor_records_http_timeout(self) -> None:
         default = ProgressMonitor("http://127.0.0.1")

@@ -24,10 +24,11 @@ against Sparkless without Java. Running the testing plugin in
 
 ### Can Sparkless read my DuckDB test database?
 
-Sparkless 4.19 can read configured tables through the optional
-`sparkless-server-duckdb` product. The server opens the database read-only,
-and tests access tables by name using the PySpark Connect client.
-See [read DuckDB tables](DUCKDB_SOURCE.md).
+The optional `sparkless-server-duckdb` product supports read-only DuckDB
+sources with Polars execution and an opt-in DuckDB Connect execution backend.
+The execution backend can create typed tables and append literal rows through
+the documented subset. See [DuckDB sources](DUCKDB_SOURCE.md) and
+[DuckDB Connect execution](DUCKDB_EXECUTION.md).
 
 ### How is Sparkless different from Polars?
 
@@ -38,7 +39,7 @@ Sparkless exposes a **PySpark-compatible API** (`SparkSession`, `groupBy`, `spar
 ### How do I install Sparkless?
 
 ```bash
-pip install "sparkless==4.19.0"
+pip install "sparkless==4.20.0"
 ```
 
 See [Python getting started](python_getting_started.md) and [Troubleshooting (Python)](TROUBLESHOOTING_PYTHON.md).
@@ -60,6 +61,14 @@ Typed scalar `F.udf` works in the local Python API. Public pandas/vectorized UDF
 ### Does `spark.sql()` work?
 
 Yes, with the SQL feature enabled in the native build. Temp views, global temp views, and many DDL/DML statements are supported. See [PySpark differences](PYSPARK_DIFFERENCES.md) for gaps.
+
+### Can the server execute queries in DuckDB?
+
+Yes, through the optional `sparkless-server-duckdb` product. Set
+`SPARKLESS_EXECUTION_BACKEND=duckdb` and configure
+`SPARKLESS_DUCKDB_EXECUTION_OWNER` before startup. Polars remains the default;
+DuckDB mode accepts only the documented Connect SQL/DataFrame subset and
+disables HTTP SQL. See [DuckDB Connect execution](DUCKDB_EXECUTION.md).
 
 ### How do I run the same tests against PySpark and Sparkless?
 

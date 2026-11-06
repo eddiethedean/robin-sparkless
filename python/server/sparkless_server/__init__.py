@@ -40,7 +40,7 @@ class SparklessConnect(_SparklessConnect):
     server_class = SparklessServer
 
 
-__version__ = "4.19.0"
+__version__ = "4.20.0"
 __all__ = [
     "AsyncSparklessServer",
     "SparklessConnect",

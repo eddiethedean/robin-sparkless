@@ -1,4 +1,4 @@
-# Python symbol reference — 4.19.0
+# Python symbol reference — 4.20.0
 
 Generated from the installed package by `scripts/generate_documentation.py --api`.
 CI regenerates this against its wheel and fails on drift. This is the runtime

@@ -1,6 +1,6 @@
 [package]
 name = "sparkless-server-core"
-version = "4.19.0"
+version = "4.20.0"
 edition = "2024"
 rust-version = "1.93"
 description = "Engine-neutral product, capability, and execution contracts for Sparkless servers"
@@ -9,6 +9,6 @@ license = "MIT"
 repository = "https://github.com/eddiethedean/robin-sparkless"
 
 [dependencies]
-robin-sparkless-core = { version = "4.19.0", path = "../robin-sparkless-core" }
-robin-sparkless-sql = { version = "4.19.0", path = "../robin-sparkless-sql" }
+robin-sparkless-core = { version = "4.20.0", path = "../robin-sparkless-core" }
+robin-sparkless-sql = { version = "4.20.0", path = "../robin-sparkless-sql" }
 serde_json = "1.0"
