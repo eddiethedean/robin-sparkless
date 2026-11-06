@@ -26,11 +26,11 @@ Implements the engine traits from `robin-sparkless-core` and converts `ExprIr` t
 ## Usage
 
 Most users depend on the main crate, which re-exports the API. This repository's
-4.19.0 quickstart is tested with Rust 1.93.1 and explicitly enables SQL:
+4.20.0 quickstart is tested with Rust 1.93.1 and explicitly enables SQL:
 
 ```toml
 [dependencies]
-robin-sparkless = { version = "=4.19.0", features = ["sql"] }
+robin-sparkless = { version = "=4.20.0", features = ["sql"] }
 ```
 
 Start with the [runnable Rust quickstart](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/QUICKSTART.md)
@@ -40,8 +40,8 @@ If you need to depend on the Polars backend directly (e.g. for a custom build or
 
 ```toml
 [dependencies]
-robin-sparkless-core = "=4.19.0"
-robin-sparkless-polars = { version = "=4.19.0", features = ["sql", "delta"] }
+robin-sparkless-core = "=4.20.0"
+robin-sparkless-polars = { version = "=4.20.0", features = ["sql", "delta"] }
 ```
 
 ## License

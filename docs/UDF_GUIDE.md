@@ -1,6 +1,6 @@
 # User-defined functions
 
-Applies to the installed **Sparkless 4.19.0 local Python API**. The HTTP and
+Applies to the installed **Sparkless 4.20.0 local Python API**. The HTTP and
 Spark Connect services do not execute Python UDFs. Prefer built-in expressions
 for performance; scalar Python UDFs collect input and run Python once per row.
 

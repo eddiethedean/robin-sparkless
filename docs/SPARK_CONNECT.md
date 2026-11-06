@@ -1,12 +1,13 @@
 # Run PySpark tests over Spark Connect
 
 Use the real PySpark Connect client with a Sparkless server running on one
-machine. The server executes supported DataFrame plans in Rust and Polars.
-This setup needs no Java installation or Spark cluster.
+machine. The default backend executes supported plans in Rust and Polars; the
+DuckDB server can opt into a separately bounded DuckDB execution subset. This
+setup needs no Java installation or Spark cluster.
 
 !!! info "Choose the guide for your version"
 
-    The examples below use **4.19.0**. Sparkless shipped the server in 4.18. In that release,
+    The examples below use **4.20.0**. Sparkless shipped the server in 4.18. In that release,
     use `SparklessServer` and create the client session yourself. Follow the
     [published 4.18.1 Connect guide](https://github.com/eddiethedean/robin-sparkless/blob/v4.18.1/docs/SPARK_CONNECT.md)
     for the matching install and imports.
@@ -18,7 +19,7 @@ Packaged server wheels target Linux x86_64 with glibc 2.28+ and macOS 14+
 on Apple Silicon.
 
 ```bash
-python -m pip install "sparkless-server[connect]==4.19.0"
+python -m pip install "sparkless-server[connect]==4.20.0"
 ```
 
 ```python
@@ -34,8 +35,10 @@ session before shutting down the server. Use a new helper in each process.
 An active instance cannot be nested, and failed cleanup can retain ownership
 for retry.
 
-For read-only DuckDB tables, use the [DuckDB server product](DUCKDB_SOURCE.md)
-and import `SparklessConnect` from `sparkless_server_duckdb`.
+For DuckDB, use the [DuckDB server product](DUCKDB_SOURCE.md) and import
+`SparklessConnect` from `sparkless_server_duckdb`. It reads configured source
+tables through Polars by default; see the [execution guide](DUCKDB_EXECUTION.md)
+to opt into DuckDB execution.
 
 ## Connect to a server you already run
 
@@ -44,7 +47,7 @@ share a server. Start the server once outside the workers and give each worker
 the endpoint URL. Each worker creates and stops its own session.
 
 ```bash
-python -m pip install "sparkless-connect[client]==4.19.0"
+python -m pip install "sparkless-connect[client]==4.20.0"
 ```
 
 ```python
@@ -72,13 +75,13 @@ To launch the packaged binary yourself, install the base server's Connect extra
 and run this in **Terminal 1**:
 
 ```bash
-python -m pip install "sparkless-server[connect]==4.19.0"
+python -m pip install "sparkless-server[connect]==4.20.0"
 server_bin="$(python -c 'from sparkless_server import executable_path; print(executable_path())')"
 "$server_bin" serve --connect-host 127.0.0.1 --connect-port 15002 --disable-http
 ```
 
 In **Terminal 2**, run the remote-session example above. For a separate client
-environment, install `sparkless-connect[client]==4.19.0`. Stop the server with
+environment, install `sparkless-connect[client]==4.20.0`. Stop the server with
 Ctrl+C. The Connect extra pins `pyspark-client==4.0.5`; Java is not required.
 
 ## Share one server across pytest workers
@@ -88,7 +91,7 @@ including `pytest.ini`, `conftest.py`, and `test_orders.py`. Run these commands
 from that directory:
 
 ```bash
-python -m pip install "sparkless-server[connect]==4.19.0" pytest pytest-xdist
+python -m pip install "sparkless-server[connect]==4.20.0" pytest pytest-xdist
 python -m pytest -n 2 test_orders.py
 ```
 
@@ -104,7 +107,7 @@ across the server, even when more workers connect. See the
 
 ## Supported request surface
 
-| Area | Supported in 4.19.0 |
+| Area | Supported in 4.20.0 |
 | --- | --- |
 | Relations | `SparkSession.range`, bounded inline scalar DataFrames with explicit schemas, and configured named DuckDB tables with the source-enabled server |
 | Transformations | Filter, projection, alias, limit, and supported inner joins |
@@ -114,15 +117,15 @@ across the server, even when more workers connect. See the
 | Results | Spark logical descriptors and bounded, independently decodable Arrow IPC batches |
 | Lifecycle | Execute, reattach, prefix/all release, session release, interrupt, enriched error lookup, and stale identity rejection |
 
-## Unreleased 4.20 DuckDB execution candidate
+## Optional DuckDB execution backend
 
-The published 4.19.0 products still execute through Polars, including when they
-read configured DuckDB source tables. A separate source implementation for
-4.20 adds an opt-in DuckDB Connect execution backend, typed table creation, and
-`INSERT ... VALUES`. Its supported surface, startup settings, owner modes, and
-open Spark/interoperability gates are documented in the
-[DuckDB execution candidate guide](DUCKDB_EXECUTION.md). Do not use that page as
-the 4.19.0 support contract.
+Set `SPARKLESS_EXECUTION_BACKEND=duckdb` and configure
+`SPARKLESS_DUCKDB_EXECUTION_OWNER` before starting `sparkless-server-duckdb`.
+That process runs one backend for its lifetime. It supports the documented
+Connect SQL/DataFrame subset and typed `CREATE TABLE` / literal
+`INSERT ... VALUES`; unsupported requests fail explicitly. HTTP SQL is disabled
+in this mode. Readiness and capabilities report the actual backend. See the
+[execution guide](DUCKDB_EXECUTION.md) and [4.20 support contract](SUPPORT_MATRIX.md).
 
 Use public column names or column references bound to their input DataFrames.
 Bound references retain their input through aliases and joins. Joins on shared

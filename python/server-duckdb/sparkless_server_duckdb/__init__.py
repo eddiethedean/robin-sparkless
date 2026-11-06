@@ -1,4 +1,4 @@
-"""DuckDB-source server product and its product-bound lifecycle helpers."""
+"""DuckDB server product and its product-bound lifecycle helpers."""
 
 from pathlib import Path
 import os
@@ -47,7 +47,7 @@ class SparklessConnect(_SparklessConnect):
     server_class = SparklessServer
 
 
-__version__ = "4.19.0"
+__version__ = "4.20.0"
 __all__ = [
     "AsyncSparklessServer",
     "SparklessConnect",

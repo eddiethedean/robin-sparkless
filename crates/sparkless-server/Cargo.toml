@@ -1,6 +1,6 @@
 [package]
 name = "sparkless-server"
-version = "4.19.0"
+version = "4.20.0"
 edition = "2024"
 rust-version = "1.93"
 description = "Base Polars HTTP and Spark Connect server product"
@@ -19,10 +19,10 @@ name = "sparkless-server"
 path = "src/main.rs"
 
 [dependencies]
-sparkless-server-polars = { version = "4.19.0", path = "../sparkless-server-polars", default-features = false }
-sparkless-server-runtime = { version = "4.19.0", path = "../sparkless-server-runtime" }
-sparkless-server-http = { version = "4.19.0", path = "../sparkless-server-http", optional = true }
-sparkless-server-connect = { version = "4.19.0", path = "../sparkless-server-connect", optional = true }
+sparkless-server-polars = { version = "4.20.0", path = "../sparkless-server-polars", default-features = false }
+sparkless-server-runtime = { version = "4.20.0", path = "../sparkless-server-runtime" }
+sparkless-server-http = { version = "4.20.0", path = "../sparkless-server-http", optional = true }
+sparkless-server-connect = { version = "4.20.0", path = "../sparkless-server-connect", optional = true }
 tokio = { version = "1.53.3", features = ["macros", "rt-multi-thread", "net", "sync", "signal"], optional = true }
 
 [dev-dependencies]

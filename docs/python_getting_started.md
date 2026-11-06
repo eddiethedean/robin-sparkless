@@ -30,7 +30,7 @@ virtual environment and run it with the same interpreter. On macOS or Linux:
 
 ```bash
 python3.11 -m venv .venv
-.venv/bin/python -m pip install "sparkless==4.19.0"
+.venv/bin/python -m pip install "sparkless==4.20.0"
 .venv/bin/python first_dataframe.py
 ```
 
@@ -38,7 +38,7 @@ On Windows PowerShell:
 
 ```powershell
 py -3.11 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install "sparkless==4.19.0"
+.\.venv\Scripts\python.exe -m pip install "sparkless==4.20.0"
 .\.venv\Scripts\python.exe first_dataframe.py
 ```
 
@@ -54,7 +54,7 @@ For wheel support by OS and architecture, see the
 ### From PyPI (recommended)
 
 ```bash
-python -m pip install "sparkless==4.19.0"
+python -m pip install "sparkless==4.20.0"
 ```
 
 Requires **Python 3.11+**. Local execution uses a native extension and needs
@@ -69,7 +69,7 @@ for architectures, libc, and feature details.
 
 ### Optional extras
 
-The table describes 4.19.0. See [installation and versions](INSTALLATION.md) for package names and platform requirements.
+The table describes 4.20.0. See [installation and versions](INSTALLATION.md) for package names and platform requirements.
 
 | Extra | Dependencies and purpose |
 | --- | --- |
@@ -87,7 +87,7 @@ The table describes 4.19.0. See [installation and versions](INSTALLATION.md) for
 For example:
 
 ```bash
-python -m pip install "sparkless[testing]==4.19.0"
+python -m pip install "sparkless[testing]==4.20.0"
 ```
 
 Use separate environments for `pyspark` and `pyspark4`; they require different

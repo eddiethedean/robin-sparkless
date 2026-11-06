@@ -1,4 +1,4 @@
-# Python API contracts — 4.19.0
+# Python API contracts — 4.20.0
 
 This page covers the most-used installed local APIs. The generated
 [symbol/signature reference](PYTHON_API_SYMBOLS.md) inventories the public runtime
@@ -76,7 +76,7 @@ aggregate return schema depends on expression aliases and input types.
 | `toArrowBatches(max_rows=10000, max_bytes=67108864)` | Context-managed RecordBatch iterator | Requires PyArrow; positive per-batch bounds; an oversized row raises `ValueError` |
 
 ```python
-# Install PyArrow first, for example with `python -m pip install "sparkless[dev]==4.19.0"`.
+# Install PyArrow first, for example with `python -m pip install "sparkless[dev]==4.20.0"`.
 from sparkless.sql import SparkSession
 spark = SparkSession.builder.app_name("arrow").get_or_create()
 try:

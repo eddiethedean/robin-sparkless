@@ -1,11 +1,11 @@
-# Rust API reference — 4.19.0
+# Rust API reference — 4.20.0
 
 Build rustdoc for every workspace crate from the published source tag. Use the
 repository-pinned Rust toolchain, **1.93.1**. This works independently of hosted
 builds or artifact retention.
 
 ```bash
-git clone --branch v4.19.0 --depth 1 https://github.com/eddiethedean/robin-sparkless.git
+git clone --branch v4.20.0 --depth 1 https://github.com/eddiethedean/robin-sparkless.git
 cd robin-sparkless
 cargo doc --locked --workspace --all-features --no-deps --open
 ```
@@ -15,9 +15,9 @@ The workspace index is `target/doc/index.html`; the facade entry page is
 optional SQL, Delta, database, and server features. CI currently retains a
 smaller `rust-api-docs` artifact for the root facade only, built with
 `cargo doc --locked -p robin-sparkless --features sql --no-deps`. The
-[4.19.0 docs.rs API route](https://docs.rs/robin-sparkless/4.19.0/robin_sparkless/)
-was unavailable at review. The [source tag](https://github.com/eddiethedean/robin-sparkless/tree/v4.19.0)
-and [crate listing](https://crates.io/crates/robin-sparkless/4.19.0) identify the release.
+[4.20.0 docs.rs API route](https://docs.rs/robin-sparkless/4.20.0/robin_sparkless/)
+was unavailable at review. The [source tag](https://github.com/eddiethedean/robin-sparkless/tree/v4.20.0)
+and [crate listing](https://crates.io/crates/robin-sparkless/4.20.0) identify the release.
 
 ## Choose your API
 

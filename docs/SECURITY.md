@@ -22,6 +22,18 @@ See [release evidence](RELEASE_EVIDENCE.md) for per-file hashes and available
 PyPI provenance. For the DuckDB server, the installed package also includes
 the Quack extension and its notice.
 
+## DuckDB Connect execution
+
+The 4.20 DuckDB execution backend accepts typed table creation and literal
+inserts from any caller allowed to reach its Spark Connect endpoint. The server
+does not provide built-in authentication or per-table authorization. Keep both
+HTTP and gRPC listeners on loopback or behind an authenticated TLS boundary;
+Connect user/session IDs are not credentials. Local database mode grants the
+server process access to its configured file and requires exclusive writable
+ownership. In Quack mode, place the owner token in a secret manager and grant
+the server only the owner permissions its workload needs. The Connect request
+cannot choose the database path, token, or extension.
+
 ## Reporting
 
 Start at the repository's [Security page](https://github.com/eddiethedean/robin-sparkless/security).

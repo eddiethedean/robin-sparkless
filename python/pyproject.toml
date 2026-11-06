@@ -1,11 +1,11 @@
 [project]
 name = "sparkless"
-version = "4.19.0"
+version = "4.20.0"
 description = "PySpark-like DataFrame API in Python—no JVM. Uses robin-sparkless (Rust/Polars) as the execution engine."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
-dependencies = ["sparkless-native==4.19.0"]
+dependencies = ["sparkless-native==4.20.0"]
 keywords = ["pyspark", "polars", "dataframe", "spark", "etl"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -49,11 +49,11 @@ pyspark = ["pyspark>=3.5,<3.6", "delta-spark>=3.0,<4"]
 # PySpark 4.x oracle (Java 17, Python 3.11+)
 pyspark4 = ["pyspark>=4.0,<4.2", "delta-spark>=4.0,<5"]
 # Install the separately built, platform-specific native HTTP server executable.
-testing = ["sparkless-testing==4.19.0"]
-server = ["sparkless-server==4.19.0"]
-connect = ["sparkless-server[connect]==4.19.0"]
-server-duckdb = ["sparkless-server-duckdb==4.19.0"]
-connect-duckdb = ["sparkless-server-duckdb[connect]==4.19.0"]
+testing = ["sparkless-testing==4.20.0"]
+server = ["sparkless-server==4.20.0"]
+connect = ["sparkless-server[connect]==4.20.0"]
+server-duckdb = ["sparkless-server-duckdb==4.20.0"]
+connect-duckdb = ["sparkless-server-duckdb[connect]==4.20.0"]
 
 [tool.pytest.ini_options]
 markers = [

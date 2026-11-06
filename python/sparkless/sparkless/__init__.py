@@ -21,7 +21,7 @@ from typing import Dict, List, Sequence, Tuple, Union, cast as _cast
 # Load the separately installed native engine before the local API classes.
 from sparkless_native._native import PyColumn as _ColumnType  # noqa: E402
 
-__version__ = "4.19.0"
+__version__ = "4.20.0"
 
 
 _mod = __import__(

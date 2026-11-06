@@ -751,6 +751,34 @@ jobs:
             docker rm "$name" >/dev/null
             trap - EXIT
           done
+      - name: Smoke DuckDB execution in the exact release container
+        if: startsWith(github.ref, 'refs/heads/codex/release-4.20') || github.ref == 'refs/tags/v4.20.0'
+        run: |
+          set -euo pipefail
+          image="sparkless-server-duckdb:candidate-${GITHUB_SHA}"
+          name="sparkless-server-duckdb-execution-${GITHUB_RUN_ID}"
+          docker run -d --name "$name" \
+            -e SPARKLESS_EXECUTION_BACKEND=duckdb \
+            -e 'SPARKLESS_DUCKDB_EXECUTION_OWNER={"mode":"local","database_path":"/tmp/sparkless-execution.duckdb"}' \
+            -p 127.0.0.1:18101:8099 -p 127.0.0.1:15004:15002 "$image"
+          cleanup() { docker logs "$name" || true; docker rm -f "$name" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          python3 tests/connect/smoke_phase420_duckdb_container.py \
+            --http-url http://127.0.0.1:18101 \
+            --connect-url sc://127.0.0.1:15004 \
+            --report "$RUNNER_TEMP/phase420-duckdb-container.json"
+          docker stop --time 10 "$name"
+          exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$name")"
+          if [[ "$exit_code" != 0 ]]; then echo "DuckDB execution image exited with status $exit_code"; exit 1; fi
+          docker rm "$name" >/dev/null
+          trap - EXIT
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always() && (startsWith(github.ref, 'refs/heads/codex/release-4.20') || github.ref == 'refs/tags/v4.20.0')
+        with:
+          name: phase420-duckdb-container
+          path: ${{ runner.temp }}/phase420-duckdb-container.json
+          if-no-files-found: warn
+          retention-days: 30
       - name: Save verified product images
         run: |
           set -euo pipefail
@@ -772,7 +800,7 @@ jobs:
     name: ${{ matrix.product }} server install (${{ matrix.runner }})
     needs: [build-wheels, source-dist, server-base-manylinux-x86_64, server-duckdb-manylinux-x86_64, server-base-macos-arm64, server-duckdb-macos-arm64]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -963,6 +991,148 @@ jobs:
         with:
           name: phase419-source-resource-${{ matrix.sparkless }}-${{ matrix.product }}
           path: ${{ runner.temp }}/phase419-source-resource-${{ matrix.sparkless }}-*.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Compare packaged HTTP performance with 4.19.0
+        if: matrix.product == 'base' && (startsWith(github.ref, 'refs/heads/codex/release-4.20') || github.ref == 'refs/tags/v4.20.0')
+        run: |
+          set -euo pipefail
+          python -m venv .venv-phase420-baseline
+          .venv-phase420-baseline/bin/python -m pip install 'sparkless-server==4.19.0'
+          baseline_bin="$(.venv-phase420-baseline/bin/python -c 'from sparkless_server import executable_path; print(executable_path())')"
+          candidate_bin="$(.venv-product/bin/python -c 'from sparkless_server import executable_path; print(executable_path())')"
+          .venv-product/bin/python tests/connect/benchmark_phase420_http.py \
+            --baseline-bin "$baseline_bin" \
+            --server-bin "$candidate_bin" \
+            --output "$RUNNER_TEMP/phase420-http-${{ matrix.sparkless }}"
+          .venv-product/bin/python tests/connect/run_slice8_benchmarks.py \
+            --client-python "$GITHUB_WORKSPACE/.venv-product/bin/python" \
+            --baseline-bin "$baseline_bin" \
+            --server-bin "$candidate_bin" \
+            --profile 419 \
+            --concurrency 8 \
+            --pair-count 3 \
+            --min-throughput-ratio 0.95 \
+            --duration-seconds 60 \
+            --active-operations 16 \
+            --rows 1000000 \
+            --slow-reader-rows 1000000 \
+            --slow-reader-pause-ms 100 \
+            --response-timeout-ms 120000 \
+            --non-reattachable-slow-reader \
+            --output "$RUNNER_TEMP/phase420-scheduler-${{ matrix.sparkless }}"
+      - name: Install exact 4.20.0 server wheels for Phase 4.20 checks
+        if: matrix.product == 'duckdb' && (startsWith(github.ref, 'refs/heads/codex/release-4.20') || github.ref == 'refs/tags/v4.20.0')
+        run: |
+          set -euo pipefail
+          version="$(python -c 'import tomllib; print(tomllib.load(open("python/pyproject.toml", "rb"))["project"]["version"])')"
+          test "$version" = 4.20.0
+          python -m venv .venv-phase420
+          .venv-phase420/bin/python -m pip install --no-index --find-links dist \
+            "sparkless-server==$version" "sparkless-server-duckdb==$version"
+          .venv-phase420/bin/python -m pip install --require-hashes -r tests/connect/client-py311.lock
+          .venv-phase420/bin/python -m pip install --require-hashes -r tests/connect/duckdb-source-py311.lock
+          .venv-phase420/bin/python -m pip check
+      - name: Exercise Phase 4.20 backend selection, writes and owner recovery
+        if: matrix.product == 'duckdb' && (startsWith(github.ref, 'refs/heads/codex/release-4.20') || github.ref == 'refs/tags/v4.20.0')
+        run: |
+          set -euo pipefail
+          base_bin="$(.venv-phase420/bin/python -c 'from sparkless_server import executable_path; print(executable_path())')"
+          duckdb_bin="$(.venv-phase420/bin/python -c 'from sparkless_server_duckdb import executable_path; print(executable_path())')"
+          quack_extension="$(.venv-phase420/bin/python -c 'from sparkless_server_duckdb import quack_extension_path; print(quack_extension_path())')"
+          owner_bin="$GITHUB_WORKSPACE/quack-fixture/duckdb_quack_fixture_owner"
+          chmod +x "$owner_bin"
+          .venv-phase420/bin/python tests/connect/smoke_phase420_backend_selection.py \
+            --base-server-bin "$base_bin" --duckdb-server-bin "$duckdb_bin" \
+            --output "$RUNNER_TEMP/phase420-backend-selection-${{ matrix.sparkless }}.json"
+          .venv-phase420/bin/python tests/connect/smoke_phase420_duckdb_execution.py --server-bin "$duckdb_bin"
+          .venv-phase420/bin/python tests/connect/smoke_phase420_duckdb_write_reattach.py \
+            --server-bin "$duckdb_bin" \
+            --report "$RUNNER_TEMP/phase420-write-reattach-${{ matrix.sparkless }}.json"
+          .venv-phase420/bin/python tests/connect/smoke_phase420_quack_execution.py \
+            --server-bin "$duckdb_bin" --quack-owner-bin "$owner_bin" \
+            --quack-extension-path "$quack_extension" \
+            --output "$RUNNER_TEMP/phase420-quack-execution-${{ matrix.sparkless }}.json"
+          .venv-phase420/bin/python tests/connect/smoke_phase420_duckdb_backend_shutdown.py \
+            --server-bin "$duckdb_bin" --quack-owner-bin "$owner_bin" \
+            --quack-extension-path "$quack_extension" \
+            --report "$RUNNER_TEMP/phase420-duckdb-shutdown-${{ matrix.sparkless }}.json"
+      - name: Exercise Phase 4.20 lifecycle through packaged sync and async launchers
+        if: matrix.product == 'duckdb' && (startsWith(github.ref, 'refs/heads/codex/release-4.20') || github.ref == 'refs/tags/v4.20.0')
+        run: |
+          .venv-phase420/bin/python tests/connect/smoke_phase420_duckdb_connect_lifecycle.py \
+            --report "$RUNNER_TEMP/phase420-connect-lifecycle-${{ matrix.sparkless }}.json"
+      - name: Set up Java 17 for the Phase 4.20 Spark oracle
+        if: matrix.product == 'duckdb' && (startsWith(github.ref, 'refs/heads/codex/release-4.20') || github.ref == 'refs/tags/v4.20.0')
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Run the packaged Phase 4.20 Spark differential
+        if: matrix.product == 'duckdb' && (startsWith(github.ref, 'refs/heads/codex/release-4.20') || github.ref == 'refs/tags/v4.20.0')
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/spark-4.0.5-bin-hadoop3-connect.tgz"
+          spark_home="$RUNNER_TEMP/spark-4.0.5-bin-hadoop3-connect"
+          curl --fail --location --retry 3 --output "$archive" \
+            https://downloads.apache.org/spark/spark-4.0.5/spark-4.0.5-bin-hadoop3-connect.tgz
+          python - "$archive" <<'PY'
+          import hashlib
+          import pathlib
+          import sys
+
+          path = pathlib.Path(sys.argv[1])
+          digest = hashlib.sha512(path.read_bytes()).hexdigest()
+          expected = "4cc2e43959b5e0a67b7d895e1aa1fb3ab05fa6ad4a5912de76236bb9b70f9557b20837b05ee63474798e927130e72ed6d1fadcd273a71e65c70eac18771c0d6b"
+          if digest != expected:
+              raise SystemExit(f"Spark reference archive SHA-512 mismatch: {digest}")
+          PY
+          mkdir -p "$spark_home"
+          tar -xzf "$archive" --strip-components=1 -C "$spark_home"
+          .venv-phase420/bin/python -m pip install --require-hashes -r tests/connect/oracle-py311.lock
+          .venv-phase420/bin/python tests/connect/differential_phase420_duckdb.py \
+            --spark-home "$spark_home" --spark-archive "$archive" \
+            --server-bin "$(.venv-phase420/bin/python -c 'from sparkless_server_duckdb import executable_path; print(executable_path())')" \
+            --output "$RUNNER_TEMP/phase420-differential-${{ matrix.sparkless }}.json"
+      - name: Inject a COMMIT WAL size failure on the packaged candidate platform
+        if: matrix.product == 'duckdb' && (startsWith(github.ref, 'refs/heads/codex/release-4.20') || github.ref == 'refs/tags/v4.20.0')
+        run: python3 scripts/run_phase420_storage_fault.py --output "$RUNNER_TEMP/phase420-storage-fault-${{ matrix.sparkless }}.json"
+      - name: Measure the Phase 4.20 owner and stream resource envelope
+        if: matrix.product == 'duckdb' && (startsWith(github.ref, 'refs/heads/codex/release-4.20') || github.ref == 'refs/tags/v4.20.0')
+        run: |
+          set -euo pipefail
+          duckdb_bin="$(.venv-phase420/bin/python -c 'from sparkless_server_duckdb import executable_path; print(executable_path())')"
+          quack_extension="$(.venv-phase420/bin/python -c 'from sparkless_server_duckdb import quack_extension_path; print(quack_extension_path())')"
+          owner_bin="$GITHUB_WORKSPACE/quack-fixture/duckdb_quack_fixture_owner"
+          for reader_mode in reattachable non-reattachable; do
+            reader_args=()
+            if [[ "$reader_mode" == non-reattachable ]]; then
+              reader_args+=(--non-reattachable-slow-reader)
+            fi
+            for owner_mode in local quack; do
+              output="$RUNNER_TEMP/phase420-v38/${owner_mode}-${reader_mode}"
+              owner_args=(--duckdb-local-owner)
+              if [[ "$owner_mode" == quack ]]; then
+                owner_args=(--quack-owner-bin "$owner_bin" --quack-extension-path "$quack_extension")
+              fi
+              .venv-phase420/bin/python tests/connect/run_slice8_benchmarks.py \
+                --client-python "$GITHUB_WORKSPACE/.venv-phase420/bin/python" \
+                --server-bin "$duckdb_bin" --profile 419 --concurrency 8 \
+                --duration-seconds 60 --active-operations 16 --queue-timeout-ms 5000 \
+                --response-timeout-ms 120000 --rows 1000000 --slow-reader-rows 1000000 \
+                --slow-reader-pause-ms 100 "${owner_args[@]}" "${reader_args[@]}" \
+                --output "$output"
+              report="$(find "$output" -name benchmark.json -print -quit)"
+              test -n "$report"
+              .venv-phase420/bin/python scripts/check_phase420_v38_report.py \
+                --report "$report" --owner-mode "$owner_mode" --reader-mode "$reader_mode"
+            done
+          done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always() && (startsWith(github.ref, 'refs/heads/codex/release-4.20') || github.ref == 'refs/tags/v4.20.0')
+        with:
+          name: phase420-candidate-${{ matrix.sparkless }}-${{ matrix.product }}
+          path: ${{ runner.temp }}/phase420-*
           if-no-files-found: warn
           retention-days: 30
 

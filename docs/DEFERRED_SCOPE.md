@@ -1,4 +1,4 @@
-# Unsupported and unverified scope — 4.19.0
+# Unsupported and unverified scope — 4.20.0
 
 The [support matrix](SUPPORT_MATRIX.md) is the release contract. Historical phase
 plans are not capability promises. “Unknown” means no reviewed behavior contract

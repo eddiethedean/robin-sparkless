@@ -133,7 +133,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
             token_preflight.get("env", {}).get("PYPI_API_TOKEN"),
             "${{ secrets.PYPI_API_TOKEN }}",
         )
-        self.assertIn("-z \"${PYPI_API_TOKEN:-}\"", token_preflight["run"])
+        self.assertIn('-z "${PYPI_API_TOKEN:-}"', token_preflight["run"])
 
         token_publishers = (
             "publish-connect",
@@ -265,7 +265,6 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 "server-duckdb-macos-arm64",
             },
         )
-
         consumer = "\n".join(
             step.get("run", "") for step in jobs["server-product-consumer"]["steps"]
         )
@@ -296,6 +295,60 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertNotIn("quack.duckdb_extension", dockerfile)
         self.assertIn("COPY quack.duckdb_extension", duckdb_dockerfile)
         self.assertIn("NOTICE-quack.txt", duckdb_dockerfile)
+
+    def test_420_candidate_checks_exact_wheels_before_inventory_acceptance(self):
+        jobs = workflow("release.yml")["jobs"]
+        consumer = jobs["server-product-consumer"]
+        self.assertGreaterEqual(consumer["timeout-minutes"], 90)
+        steps = consumer["steps"]
+        step_names = [step.get("name", "") for step in steps]
+        commands = "\n".join(step.get("run", "") for step in steps)
+        for expected in (
+            "Install exact 4.20.0 server wheels for Phase 4.20 checks",
+            "Exercise Phase 4.20 backend selection, writes and owner recovery",
+            "Exercise Phase 4.20 lifecycle through packaged sync and async launchers",
+            "Run the packaged Phase 4.20 Spark differential",
+            "Inject a COMMIT WAL size failure on the packaged candidate platform",
+            "Measure the Phase 4.20 owner and stream resource envelope",
+            "Compare packaged HTTP performance with 4.19.0",
+        ):
+            with self.subTest(step=expected):
+                self.assertIn(expected, step_names)
+        for command in (
+            "smoke_phase420_backend_selection.py",
+            "smoke_phase420_duckdb_execution.py",
+            "smoke_phase420_duckdb_write_reattach.py",
+            "smoke_phase420_quack_execution.py",
+            "smoke_phase420_duckdb_backend_shutdown.py",
+            "smoke_phase420_duckdb_connect_lifecycle.py",
+            "differential_phase420_duckdb.py",
+            "check_phase420_v38_report.py",
+            "run_phase420_storage_fault.py",
+            "benchmark_phase420_http.py",
+            "--min-throughput-ratio 0.95",
+        ):
+            with self.subTest(command=command):
+                self.assertIn(command, commands)
+        candidate_steps = [
+            step
+            for step in steps
+            if "phase420" in step.get("name", "").lower()
+            or "Phase 4.20" in step.get("name", "")
+        ]
+        for step in candidate_steps:
+            if step.get("run"):
+                self.assertIn("codex/release-4.20", step.get("if", ""))
+        self.assertIn(
+            "server-product-consumer", jobs["release-validation-gate"]["needs"]
+        )
+        container_steps = jobs["server-container"]["steps"]
+        self.assertIn(
+            "Smoke DuckDB execution in the exact release container",
+            [step.get("name") for step in container_steps],
+        )
+        container_commands = "\n".join(step.get("run", "") for step in container_steps)
+        self.assertIn("smoke_phase420_duckdb_container.py", container_commands)
+        self.assertIn("SPARKLESS_EXECUTION_BACKEND=duckdb", container_commands)
 
     def test_every_validation_job_is_required_before_publishing(self):
         jobs = workflow("release.yml")["jobs"]
@@ -378,7 +431,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
             if step.get("name") == "Publish to crates.io in dependency order"
         )
         self.assertIn("last_new_publish", script)
-        self.assertIn("sleep \"$wait_seconds\"", script)
+        self.assertIn('sleep "$wait_seconds"', script)
         self.assertIn("last_new_publish + 300", script)
         self.assertIn("429 Too Many Requests", script)
         self.assertIn("Please try again after", script)

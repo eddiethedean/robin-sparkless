@@ -1,6 +1,6 @@
 # Types, schemas, and errors
 
-Contract: local Sparkless 4.19.0. For the narrower remote type set, use the
+Contract: local Sparkless 4.20.0. For the narrower remote type set, use the
 [Connect matrix](SPARK_CONNECT.md) and [HTTP result schema](HTTP_API.md).
 
 ## Explicit schema first

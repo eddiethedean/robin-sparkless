@@ -80,6 +80,7 @@ nav:
     - Test with Sparkless and PySpark: TESTING_GUIDE.md
     - File pipeline tutorial: PIPELINE_TUTORIAL.md
     - 4.19 Rust and package changes: MIGRATION_4_19.md
+    - 4.20 candidate migration: MIGRATION_4_20.md
     - Persistence and tables: PERSISTENCE_GUIDE.md
     - Scalar UDFs: UDF_GUIDE.md
     - External catalogs: EXTERNAL_CATALOGS.md

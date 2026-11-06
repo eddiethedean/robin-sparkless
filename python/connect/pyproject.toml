@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sparkless-connect"
-version = "4.19.0"
+version = "4.20.0"
 description = "Lightweight Sparkless server and Spark Connect client lifecycle helpers"
 readme = "README.md"
 requires-python = ">=3.11"

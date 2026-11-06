@@ -18,7 +18,7 @@ metadata declares Python 3.11 or newer. See the
 for architectures and operating system floors.
 
 ```bash
-python -m pip install "sparkless==4.19.0"
+python -m pip install "sparkless==4.20.0"
 ```
 
 ## Quick start

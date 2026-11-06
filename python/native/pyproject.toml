@@ -1,6 +1,6 @@
 [project]
 name = "sparkless-native"
-version = "4.19.0"
+version = "4.20.0"
 description = "Native Rust/Polars execution engine for Sparkless."
 readme = "README.md"
 license = "MIT"

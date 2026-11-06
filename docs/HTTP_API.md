@@ -1,4 +1,4 @@
-# HTTP statement API — 4.19.0
+# HTTP statement API — 4.20.0
 
 This is a bounded native SQL service, separate from the narrower Spark Connect
 plan API. Obtain the matching [server distribution](INSTALLATION.md) first.
@@ -10,7 +10,7 @@ authenticated TLS boundary. Session names and instance IDs are identities, not s
 Install the base server on a [supported platform](INSTALLATION.md#platforms-and-build-features).
 
 ```bash
-python -m pip install "sparkless-server==4.19.0"
+python -m pip install "sparkless-server==4.20.0"
 ```
 
 Save this as `http_query.py` and run `python http_query.py`. The wheel stores

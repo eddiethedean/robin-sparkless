@@ -16,7 +16,7 @@ In a Python 3.11 [virtual environment](INSTALLATION.md), install
 For 4.18, follow the [guide at the published tag](https://github.com/eddiethedean/robin-sparkless/blob/v4.18.1/docs/TESTING_GUIDE.md).
 
 ```bash
-python -m pip install "sparkless[testing]==4.19.0"
+python -m pip install "sparkless[testing]==4.20.0"
 ```
 
 ### 1. Add the pytest plugin to your `conftest.py`
@@ -62,11 +62,11 @@ one of these installs and run from the same test directory.
 
 ```bash
 # PySpark 3.5.8
-python -m pip install "sparkless[testing]==4.19.0" "pyspark==3.5.8"
+python -m pip install "sparkless[testing]==4.20.0" "pyspark==3.5.8"
 SPARKLESS_TEST_MODE=pyspark SPARKLESS_PYSPARK_COMPAT=3.5 python -m pytest test_example.py
 
 # PySpark 4.0.5
-python -m pip install "sparkless[testing]==4.19.0" "pyspark==4.0.5"
+python -m pip install "sparkless[testing]==4.20.0" "pyspark==4.0.5"
 SPARKLESS_TEST_MODE=pyspark SPARKLESS_PYSPARK_COMPAT=4.0 python -m pytest test_example.py
 ```
 
@@ -307,12 +307,11 @@ IntegerType = imports.IntegerType
 
 The module provides utilities for comparing DataFrames, which is essential for parity testing.
 
-The published 4.19.0 `sparkless-testing` artifact has the schema comparison bug
-tracked in [#1746](https://github.com/eddiethedean/robin-sparkless/issues/1746).
-The unreleased 4.20 source candidate compares nullability, metadata, decimal
-parameters, nested types, and mapping schemas for empty expected results. See
-the [comparison API contract](TESTING_PYTHON_API.md#comparison-semantics) for
-the exact source behavior and version limit.
+The 4.19.0 `sparkless-testing` artifact had the schema comparison bug tracked
+in [#1746](https://github.com/eddiethedean/robin-sparkless/issues/1746). The
+4.20.0 package compares nullability, metadata, decimal parameters, nested types,
+and declared mapping schemas for empty expected results. See the
+[comparison API contract](TESTING_PYTHON_API.md#comparison-semantics).
 
 ### `assert_dataframes_equal`
 
@@ -505,7 +504,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: python -m pip install "sparkless[testing]==4.19.0"
+      - run: python -m pip install "sparkless[testing]==4.20.0"
       - run: pytest tests/ -v
 
   test-pyspark:
@@ -519,7 +518,7 @@ jobs:
         with:
           distribution: "temurin"
           java-version: "17"
-      - run: python -m pip install "sparkless[testing]==4.19.0" "pyspark==4.0.5"
+      - run: python -m pip install "sparkless[testing]==4.20.0" "pyspark==4.0.5"
       - run: SPARKLESS_TEST_MODE=pyspark SPARKLESS_PYSPARK_COMPAT=4.0 pytest tests/ -v
 ```
 
@@ -654,7 +653,7 @@ see [Spark Connect](SPARK_CONNECT.md).
 Install `sparkless-testing` in the same environment as pytest:
 
 ```bash
-python -m pip install "sparkless-testing==4.19.0"
+python -m pip install "sparkless-testing==4.20.0"
 ```
 
 For repository development, use the [contributor setup](https://github.com/eddiethedean/robin-sparkless/blob/main/CONTRIBUTING.md#setup) and rebuild the native extension after Rust changes.

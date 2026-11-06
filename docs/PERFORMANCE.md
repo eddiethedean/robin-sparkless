@@ -23,7 +23,7 @@ from publication requirements. Historical PR benchmarks are not general product 
 
 ## Compare a small local test
 
-Install `sparkless==4.19.0` in one environment and `pyspark==4.0.5` with
+Install `sparkless==4.20.0` in one environment and `pyspark==4.0.5` with
 Java 17 in another. Save this as `time_orders.py` and run
 `python time_orders.py sparkless` or `python time_orders.py pyspark` in the
 matching environment. Use a fresh process for each run.

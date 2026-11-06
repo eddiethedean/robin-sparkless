@@ -19,7 +19,7 @@ root `robin-sparkless` crate composes those layers and exposes the familiar
 | `robin-sparkless-delta` | Delta path normalization, snapshot loading, table creation, and transaction commits; no Polars dependency |
 | `robin-sparkless-jdbc` | Driver-neutral JDBC option parsing, URL matching, SQL identifier/dialect policy, and credential redaction |
 | `robin-sparkless-jdbc-polars` | Feature-gated database connections, JDBC reads/writes, and database-to-Polars conversion |
-| `robin-sparkless-duckdb` | Configured DuckDB source reads plus the 4.20 candidate execution owner, bounded Arrow streams, transactional Connect writes, and operation receipts |
+| `robin-sparkless-duckdb` | Configured DuckDB source reads, the optional Connect execution owner, bounded Arrow streams, transactional writes, and operation receipts |
 | `robin-sparkless` | Concrete Polars-backed Rust facade and core/Polars exports |
 | `sparkless-native` | Python ABI, conversion, Python callback ownership, and Python exception mapping |
 | `sparkless-server-core` | Engine-neutral server configuration and SQL/Connect execution-port contracts |
@@ -33,9 +33,10 @@ HTTP and Connect requests reach the same engine-neutral runtime; it owns admissi
 operation accounting, and the generic session registry while product composition
 supplies the session adapter and product-specific RPC handlers. Connect's protocol
 build, wire limits, generated service dispatch, listener, replay records, session history, and transport budgets
-live in the Connect crate. The DuckDB server product still adds only the read-only
-source capability; a source provider does not imply DuckDB writes or DuckDB query
-execution.
+live in the Connect crate. The DuckDB server product includes the read-only source
+capability and can opt into its DuckDB execution adapter through trusted startup
+configuration. Source aliases and the writable execution database remain separate;
+the base product does not compile or ship DuckDB/Quack.
 
 The Connect execution port accepts a typed `ConnectExecutionPlan` and returns a
 logical schema with Arrow IPC batches. The Polars adapter converts the incoming wire
