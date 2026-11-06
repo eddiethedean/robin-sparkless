@@ -10,7 +10,7 @@ See the [support contract](SUPPORT_MATRIX.md) for explicit per-surface support s
 | Pytest expected-output files (mixed historical oracle provenance) | 271 |
 | Separate generated plan/input JSON fixtures | 490 |
 | Pytest parity source modules | 56 |
-| Connect test source/fixture files | 33 |
+| Connect test source/fixture files | 35 |
 
 ## Oracle provenance and scope
 
