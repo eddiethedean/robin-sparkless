@@ -28,14 +28,23 @@ def main() -> None:
     parser.add_argument("--url", required=True)
     parser.add_argument("--rows", type=int, required=True)
     parser.add_argument("--pause-ms", type=float, default=100.0)
+    parser.add_argument("--timeout-seconds", type=float, default=120.0)
     parser.add_argument("--non-reattachable", action="store_true")
     parser.add_argument("--ready-file", type=Path)
     parser.add_argument("--barrier-file", type=Path)
     parser.add_argument("--first-batch-file", type=Path)
     parser.add_argument("--table")
     args = parser.parse_args()
-    if args.rows < 1 or not math.isfinite(args.pause_ms) or args.pause_ms < 0:
-        raise ValueError("rows must be positive and pause duration non-negative")
+    if (
+        args.rows < 1
+        or not math.isfinite(args.pause_ms)
+        or args.pause_ms < 0
+        or not math.isfinite(args.timeout_seconds)
+        or args.timeout_seconds <= 0
+    ):
+        raise ValueError(
+            "rows and RPC timeout must be positive and pause duration non-negative"
+        )
     if args.table is not None and not re.fullmatch(
         r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*", args.table
     ):
@@ -68,7 +77,7 @@ def main() -> None:
         metadata = client._builder.metadata()
         released_responses = 0
         for response in client._stub.ExecutePlan(
-            request, metadata=metadata, timeout=120
+            request, metadata=metadata, timeout=args.timeout_seconds
         ):
             client._verify_response_integrity(response)
             if response.HasField("arrow_batch"):

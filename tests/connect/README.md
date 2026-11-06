@@ -235,10 +235,14 @@ pass and failure. The expanded local report is retained at
 `docs/plans/sparkless-server/evidence/phase-420-duckdb-connect-differential-expanded-local.json.gz`.
 The separate Quack smoke covers a pre-analyzed catalog change, owner/listener restart, cancellation,
 lost-response reattachment, changed-content conflict under a durable identity, and unchanged replay
-after server and owner restarts. A 1M-row reattachable stream also completes after owner loss; after
+after server and owner restarts. A paced 250K-row reattachable stream must return all rows or a
+Quack/connection error before its 60-second RPC deadline; the V38 load matrix separately requires
+paced 1M-row streams. After
 the owner returns, one query attempt in the existing Connect session fails with `Invalid connection
 id` and the next same-session retry succeeds. It does not close the full V38 resource, saturation,
-release, or arbitrary partial-I/O recovery gates.
+release, or arbitrary partial-I/O recovery gates. The updated 250K-row local owner-loss report is
+retained at
+[`phase-420-quack-owner-loss-250k-local.json`](../../docs/plans/sparkless-server/evidence/phase-420-quack-owner-loss-250k-local.json).
 
 ## Slice 6 integrated conformance
 

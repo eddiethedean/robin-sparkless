@@ -1020,6 +1020,7 @@ jobs:
             --slow-reader-pause-ms 100 \
             --response-timeout-ms 120000 \
             --non-reattachable-slow-reader \
+            --allow-capacity-rejections \
             --output "$RUNNER_TEMP/phase420-scheduler-${{ matrix.sparkless }}"
       - name: Install exact 4.20.0 server wheels for Phase 4.20 checks
         if: matrix.product == 'duckdb' && (startsWith(github.ref, 'refs/heads/codex/release-4.20') || github.ref == 'refs/tags/v4.20.0')

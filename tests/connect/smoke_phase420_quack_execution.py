@@ -287,6 +287,7 @@ def verify_quack_owner_loss_during_stream(
     if server._server is None:
         raise RuntimeError("Connect server is not running")
     reader_path = Path(__file__).with_name("slice8_raw_slow_reader.py").resolve()
+    stream_row_count = 250_000
     with tempfile.TemporaryDirectory(
         prefix="sparkless-phase420-quack-owner-loss-"
     ) as directory:
@@ -302,9 +303,11 @@ def verify_quack_owner_loss_during_stream(
                 "--table",
                 "shutdown_events",
                 "--rows",
-                "1000000",
+                str(stream_row_count),
                 "--pause-ms",
                 "100",
+                "--timeout-seconds",
+                "60",
                 "--ready-file",
                 str(ready_file),
                 "--first-batch-file",
@@ -376,12 +379,12 @@ def verify_quack_owner_loss_during_stream(
             if owner.stdout is not None:
                 owner.stdout.close()
             try:
-                reader_stdout, reader_stderr = reader.communicate(timeout=90)
+                reader_stdout, reader_stderr = reader.communicate(timeout=75)
             except subprocess.TimeoutExpired:
                 reader.kill()
                 reader_stdout, reader_stderr = reader.communicate(timeout=5)
                 raise TimeoutError(
-                    "Quack-backed stream did not fail within 90 seconds of owner loss: "
+                    "Quack-backed stream did not settle within 75 seconds of owner loss: "
                     f"{reader_stderr[-2000:]}"
                 )
             failure = reader_stderr.replace(owner_info["token"], "[redacted]")
@@ -436,7 +439,10 @@ def verify_quack_owner_loss_during_stream(
                     if isinstance(candidate, dict) and "rows" in candidate:
                         stream_result = candidate
                         break
-                if stream_result is None or stream_result.get("rows") != 1_000_000:
+                if (
+                    stream_result is None
+                    or stream_result.get("rows") != stream_row_count
+                ):
                     raise AssertionError(
                         "stream completed after owner loss with an invalid result: "
                         f"{reader_stdout[-2000:]}"
@@ -532,6 +538,7 @@ def verify_quack_owner_loss_during_stream(
                 {
                     "owner_killed_during_active_stream": True,
                     "first_batch": first_batch,
+                    "stream_expected_rows": stream_row_count,
                     "stream_outcome": (
                         "completed_after_owner_loss"
                         if reader.returncode == 0

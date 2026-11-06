@@ -624,6 +624,29 @@ def connect_capacity_rejection(
     return rejection
 
 
+def require_candidate_without_capacity_rejections(
+    report: dict[str, Any], pair: int
+) -> None:
+    """Keep expected baseline saturation visible without accepting it in the candidate."""
+    count = report.get("capacity_rejection_count")
+    if not isinstance(count, int) or count < 0:
+        raise RuntimeError(
+            f"paired candidate {pair} has an invalid capacity-rejection count: {count!r}"
+        )
+    if count:
+        rejections = [
+            rejection
+            for cohort in report.get("cohorts", [])
+            for rejection in cohort.get("capacity_rejections", [])
+        ]
+        final_rejection = report.get("slow_reader", {}).get("capacity_rejection")
+        if final_rejection is not None:
+            rejections.append(final_rejection)
+        raise RuntimeError(
+            f"paired candidate {pair} had {count} capacity rejection(s): {rejections!r}"
+        )
+
+
 def phase_trace_summary(
     lines: str, *, slow_reader_operation_id: str | None = None
 ) -> dict[str, Any]:
@@ -1170,7 +1193,7 @@ def main() -> int:
     parser.add_argument(
         "--allow-capacity-rejections",
         action="store_true",
-        help="record bounded compute-admission timeouts during saturation runs",
+        help="record bounded saturation rejections; paired comparisons still require a clean candidate",
     )
     parser.add_argument(
         "--baseline-bin", type=Path, help="compare with this binary in rotating pairs"
@@ -1295,6 +1318,7 @@ def run_comparison(args: argparse.Namespace) -> int:
             json.loads(reports[side].read_text(encoding="utf-8"))
             for side in ("baseline", "candidate")
         )
+        require_candidate_without_capacity_rejections(candidate, pair)
         if (
             baseline["settings"] != candidate["settings"]
             or not baseline["server_shutdown"]["graceful"]
@@ -1315,6 +1339,12 @@ def run_comparison(args: argparse.Namespace) -> int:
                 "candidate_operations_per_second": cand["operations_per_second"],
                 "throughput_ratio": cand["operations_per_second"]
                 / base["operations_per_second"],
+                "baseline_capacity_rejection_count": baseline[
+                    "capacity_rejection_count"
+                ],
+                "candidate_capacity_rejection_count": candidate[
+                    "capacity_rejection_count"
+                ],
             }
             for quantile, budget in summary["short_job_regression_budget"].items():
                 baseline_ms = base[f"short_job_latency_{quantile}_ms"]
