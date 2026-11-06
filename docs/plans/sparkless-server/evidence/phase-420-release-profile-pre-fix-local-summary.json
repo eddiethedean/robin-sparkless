@@ -1,0 +1,106 @@
+{
+  "format_version": 1,
+  "limitations": [
+    "Local macOS arm64 only; no CI evidence used.",
+    "Release-profile executables are local builds, not packaged or published 4.20.0 artifacts.",
+    "V38 slow-reader backpressure, supported capacity, concurrent owner loss, cross-platform storage faults, and post-fault durability remain open."
+  ],
+  "open_diagnostic": {
+    "capacity_rejections": 9,
+    "final_slow_reader": {
+      "diagnostic": "Connect response stream stalled without progress",
+      "source": "final_slow_reader",
+      "status": "DEADLINE_EXCEEDED"
+    },
+    "final_slow_reader_seconds": 40.45988633413799,
+    "graceful_server_shutdown": true,
+    "health_probe_errors": [],
+    "health_requests": 378,
+    "interpretation": "Release binary confirms the capacity diagnostic and graceful cleanup; it does not pass V38 or establish a supported-load envelope.",
+    "isolated_fresh_owner_reproduction": {
+      "no_pause_control": "1,000,000 rows in 489 responses; reader elapsed 0.081 seconds",
+      "paced_reader_status": "DEADLINE_EXCEEDED after 40.965 seconds",
+      "paced_responses_before_stall": 374,
+      "paced_rows_before_stall": 765952,
+      "report": "phase-420-duckdb-v38-release-direct-reader-local.json",
+      "report_sha256": "875fcaebab1d783c7bdcffbc52b4b0fec3524e9f6cb14a7f5e2a7d71272375e7"
+    },
+    "name": "V38 non-reattachable slow-reader transport/backpressure under concurrent load",
+    "report": "phase-420-duckdb-v38-release-nonreattachable-local.json.gz",
+    "report_sha256": "62f8a0d3e116f45ba53c28921b1822c42846890d77fec48fae69a60e317c358c",
+    "result": "capacity_rejections_observed",
+    "server_sha256": "a00dd748466aa2125b9ae8d6d80aff6f488df421617e91d8cdb51d074c8afa7d",
+    "settings": {
+      "active_operations": 1,
+      "cohort_seconds": 60,
+      "concurrency": [
+        8
+      ],
+      "response_timeout_ms": 120000,
+      "slow_reader_pause_ms": 100.0
+    }
+  },
+  "passed_checks": {
+    "backend_startup_selection": {
+      "probe_count": 6,
+      "report": "phase-420-backend-startup-release-local.json",
+      "report_sha256": "b3f3d79ae7792e835a1624dd737fbbbde3b1acb0fb0059aadb523d4cb74425de",
+      "result": "passed",
+      "runner_sha256": "762e99fa5b8dad5467f25228b658c1eb2c0399ab67b2881e39a8f10788881f69"
+    },
+    "duckdb_public_connect_execution": {
+      "command": "PYTHONPATH=python/server-duckdb:python/connect /tmp/sparkless-phase420-client-py311/bin/python tests/connect/smoke_phase420_duckdb_execution.py --server-bin target/release/sparkless-server-duckdb",
+      "result": "passed"
+    },
+    "local_owner_write_reattachment_and_restart_replay": {
+      "report": "phase-420-duckdb-write-reattach-release-local.json",
+      "report_sha256": "10cff769cb29531520f38b3b19143094bee4218d940379fe45d3916ecb33407d",
+      "result": "passed",
+      "runner_sha256": "193e9bfa95d03c30a88394a0d9aac3bc41813c72dec59f128818a9516498e831",
+      "server_sha256": "a00dd748466aa2125b9ae8d6d80aff6f488df421617e91d8cdb51d074c8afa7d"
+    },
+    "shared_quack_owner_lifecycle_and_restart_replay": {
+      "fixture_owner_sha256": "448df3700db8a0a9b8d348064bee3da2811fb679e0a25d3542c35f4624bf105f",
+      "quack_extension_sha256": "ef547f01cb30412aa6dbade59bdd5254ed897ba4f113a1700e3e01e00a747935",
+      "report": "phase-420-quack-execution-release-local.json",
+      "report_sha256": "b5f82beb352c0134580f1885db2cda2417f6927c988780ad3b5dfb68c03f4bd0",
+      "result": "passed",
+      "same_session_retry_succeeded": true,
+      "server_sha256": "a00dd748466aa2125b9ae8d6d80aff6f488df421617e91d8cdb51d074c8afa7d",
+      "stream_rows_after_owner_loss": 1000000
+    },
+    "spark_4_0_5_differential": {
+      "committed_write_witnesses": 6,
+      "matched_result_schema_cases": 44,
+      "query_witnesses": 51,
+      "rejected_forms": 20,
+      "report": "phase-420-duckdb-connect-differential-release-local.json.gz",
+      "report_sha256": "345203658dbd94171f50c0b22874c41735866995a496ec07e96e38b7896ed527",
+      "result": "passed",
+      "runner_sha256": "6252c84852135ee5a9cce349da0dad0e76aaa33b39f886a98d5d2ef7cef116a2",
+      "server_sha256": "a00dd748466aa2125b9ae8d6d80aff6f488df421617e91d8cdb51d074c8afa7d"
+    }
+  },
+  "phase": "4.20",
+  "platform": "macOS-26.5.2-arm64-arm-64bit",
+  "release_profile_builds": {
+    "base_server": {
+      "command": "cargo build --locked --release -p sparkless-server --no-default-features --features http,connect",
+      "path": "target/release/sparkless-server",
+      "sha256": "c673bb9e378fcfd11a83e950383d44ab7df49bb79b75f9a6d16bd2afa84cfa98"
+    },
+    "duckdb_server": {
+      "command": "cargo build --locked --release -p sparkless-server-duckdb --no-default-features --features http,connect",
+      "path": "target/release/sparkless-server-duckdb",
+      "sha256": "a00dd748466aa2125b9ae8d6d80aff6f488df421617e91d8cdb51d074c8afa7d"
+    },
+    "quack_fixture_owner": {
+      "command": "cargo build --locked --release -p robin-sparkless-duckdb --example duckdb_quack_fixture_owner",
+      "path": "target/release/examples/duckdb_quack_fixture_owner",
+      "sha256": "448df3700db8a0a9b8d348064bee3da2811fb679e0a25d3542c35f4624bf105f"
+    }
+  },
+  "slice": "420-01/03/04/05 local release-profile acceptance",
+  "source_revision": "0b5c59fe198b3e06595f10e8c95e843eb956c703",
+  "timestamp_utc": "2026-11-06T05:47:56.467519+00:00"
+}

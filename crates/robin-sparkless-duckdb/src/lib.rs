@@ -31,7 +31,8 @@ mod snapshot;
 pub use catalog::DuckDbCatalog;
 pub use config::{DuckDbQuackSourceConfig, DuckDbSourceConfig, DuckDbSourceSpec};
 pub use execution::{
-    DUCKDB_EXECUTION_MAX_BATCH_BYTES, DUCKDB_EXECUTION_MAX_BATCH_ROWS,
+    ArrowIpcQueryOptions, DUCKDB_EXECUTION_MAX_BATCH_BYTES, DUCKDB_EXECUTION_MAX_BATCH_ROWS,
+    DUCKDB_EXECUTION_MAX_QUEUED_READS, DUCKDB_EXECUTION_MAX_READ_CONNECTIONS,
     DUCKDB_EXECUTION_MAX_RECEIPTS, DuckDbExecutionOwner, DuckDbExecutionOwnerConfig,
     DuckDbTransactionOutcome,
 };

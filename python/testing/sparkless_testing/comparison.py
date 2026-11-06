@@ -394,20 +394,12 @@ def _compare_schemas(actual_schema: Any, expected_schema: Any) -> bool:
 
         actual_nullable = _field_value(actual_field, "nullable")
         expected_nullable = _field_value(expected_field, "nullable")
-        if (
-            expected_nullable is not None
-            and actual_nullable is not None
-            and actual_nullable != expected_nullable
-        ):
+        if expected_nullable is not None and actual_nullable != expected_nullable:
             return False
 
         actual_metadata = _field_value(actual_field, "metadata")
         expected_metadata = _field_value(expected_field, "metadata")
-        if (
-            expected_metadata is not None
-            and actual_metadata is not None
-            and actual_metadata != expected_metadata
-        ):
+        if expected_metadata is not None and actual_metadata != expected_metadata:
             return False
 
     return True
@@ -441,9 +433,7 @@ def _compare_types(actual_type: Any, expected_type: Any) -> bool:
             expected_type, "containsNull", "contains_null"
         )
         return _compare_types(actual_element, expected_element) and (
-            expected_nullable is None
-            or actual_nullable is None
-            or actual_nullable == expected_nullable
+            expected_nullable is None or actual_nullable == expected_nullable
         )
 
     if actual_kind == "map":
@@ -460,11 +450,7 @@ def _compare_types(actual_type: Any, expected_type: Any) -> bool:
         return (
             _compare_types(actual_key, expected_key)
             and _compare_types(actual_value, expected_value)
-            and (
-                expected_nullable is None
-                or actual_nullable is None
-                or actual_nullable == expected_nullable
-            )
+            and (expected_nullable is None or actual_nullable == expected_nullable)
         )
 
     return bool(

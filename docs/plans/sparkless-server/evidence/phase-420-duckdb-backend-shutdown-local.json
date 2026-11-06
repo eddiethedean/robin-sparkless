@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "result": "passed",
+  "timestamp_utc": "2026-11-06T10:14:27.598426+00:00",
+  "source_revision": "0b5c59fe198b3e06595f10e8c95e843eb956c703",
+  "platform": "macOS-26.5.2-arm64-arm-64bit",
+  "python": "3.11.15",
+  "pyspark_client": "4.0.5",
+  "backend": "duckdb",
+  "server_version": "sparkless-server-duckdb 4.19.0",
+  "server_sha256": "06286564b7b10890b6a6d98fad6cb8276beb8292431efcb8387f1f62f764ec6d",
+  "server_exit_code": 0,
+  "quack_owner_sha256": "448df3700db8a0a9b8d348064bee3da2811fb679e0a25d3542c35f4624bf105f",
+  "quack_owner_exit_code": 0,
+  "quack_extension_sha256": "ef547f01cb30412aa6dbade59bdd5254ed897ba4f113a1700e3e01e00a747935",
+  "active_owner_states_before_shutdown": [
+    "active"
+  ],
+  "remote_cancel_accepted": true,
+  "remaining_active_owner_states": [],
+  "shutdown_seconds": 0.13323958311229944,
+  "client_result": "SparkException: Spark Connect server is shutting down",
+  "server_diagnostics": [
+    "sparkless-server ready http_address=Some(127.0.0.1:61735) connect_address=Some(127.0.0.1:61736) instance_id=2333148a-733e-4954-a6eb-80640b446f6c",
+    "connect_trace event=rpc method=AnalyzePlan",
+    "connect_trace event=rpc method=ExecutePlan",
+    "connect_trace event=producer_started sequence=1",
+    "connect_trace event=duckdb_source_cancel_requested",
+    "connect_trace event=duckdb_source_remote_cancel accepted=true",
+    "connect_trace event=producer_phases operation_id=2bf37429-55c5-4418-b2b3-90fcb10cd55a admission_wait_ms=0.005 planning_ms=150.446 arrow_next_ms=0.000 replay_accounting_ms=0.000 blocked_send_ms=0.000 client_ack_wait_ms=0.000 first_batch_grace_ms=0.000 admission_reacquire_ms=0.000 responses=0 rows=0 response_bytes=0"
+  ]
+}

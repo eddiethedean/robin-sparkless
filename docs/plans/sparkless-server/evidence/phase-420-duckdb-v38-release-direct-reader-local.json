@@ -1,0 +1,37 @@
+{
+  "format_version": 1,
+  "gate": "V38 non-reattachable reader diagnostic",
+  "interpretation": "The fresh-owner release run reproduces the no-progress send-stall failure after 765,952 rows. The same release binary drains all one million rows when the reader does not pause. This isolates the failure from concurrent load and operation deadline but does not identify a code fix; V38 remains open.",
+  "no_pause_control": {
+    "command": "tests/connect/slice8_raw_slow_reader.py --rows 1000000 --pause-ms 0 --non-reattachable (release server, fresh temporary local DuckDB owner)",
+    "reader_elapsed_seconds": 0.08100608317181468,
+    "reader_exit_code": 0,
+    "responses": 489,
+    "rows": 1000000,
+    "status": "passed"
+  },
+  "paced_reader": {
+    "command": "tests/connect/slice8_raw_slow_reader.py --rows 1000000 --pause-ms 100 --non-reattachable (release server, fresh temporary local DuckDB owner)",
+    "control_trace": "connect_trace event=producer_phases operation_id=e77624f5-eb35-43f4-97d1-2b97cd2fbe77 blocked_send_ms=26415.579 responses=374 rows=765952 response_bytes=6312752",
+    "elapsed_seconds": 40.965,
+    "message": "Connect response stream stalled without progress for 5 seconds",
+    "reader_exit_code": 1,
+    "server_observed_responses": 374,
+    "server_observed_rows": 765952,
+    "server_response_bytes": 6312752,
+    "server_total_blocked_send_ms": 26415.579,
+    "status": "DEADLINE_EXCEEDED"
+  },
+  "phase": "4.20",
+  "platform": "macOS arm64",
+  "reader_script": "tests/connect/slice8_raw_slow_reader.py",
+  "reader_script_sha256": "71b6872bd07abaf636df341e02024a111af6b24243c419380fe19d853afff7a8",
+  "scope": [
+    "One macOS arm64 local release-profile binary and temporary DuckDB owner.",
+    "No CI was used.",
+    "This diagnostic is not a V38 pass or supported-load claim."
+  ],
+  "server_binary": "target/release/sparkless-server-duckdb",
+  "server_binary_sha256": "a00dd748466aa2125b9ae8d6d80aff6f488df421617e91d8cdb51d074c8afa7d",
+  "timestamp_utc": "2026-11-06T05:52:40.585487+00:00"
+}

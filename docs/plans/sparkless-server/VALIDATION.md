@@ -20,6 +20,55 @@ The public 4.16.0 registries currently contain the expected PyPI inventories (ni
 
 For each gate record the native commit, client/reference versions and digests, command, environment/hardware, result artifact, and known limitations. Compare schemas as well as values. Keep direct HTTP and standalone Connect results separate. Optional external route evidence is supplemental; older component records below describe their historical scope and do not add current release prerequisites.
 
+## Phase 4.20 local candidate update (2026-11-06)
+
+The [release-profile local summary](evidence/phase-420-release-profile-local-summary.json)
+links current macOS arm64 binaries, client runs, test counts, and deterministic
+report hashes (summary SHA-256 `57a84add0dad6d312a336f7641006975450b0c1d9aee9c56672e460cd703f294`).
+The final DuckDB server binary SHA-256 is
+`06286564b7b10890b6a6d98fad6cb8276beb8292431efcb8387f1f62f764ec6d`.
+
+- The public Spark 4.0.5 differential passed 44 result/schema cases and rejected
+  20 unsupported forms. It recorded 51 query witnesses and six committed-write
+  witnesses. The local owner and DuckDB-source server suites passed 19 (one
+  manual fault test ignored) and 101 tests, respectively. The owner suite now
+  checks cancelled queue-waiter cleanup and disposal of invalidated read
+  connections. Strict Clippy passed
+  for the DuckDB owner and Connect/DuckDB-source server. The focused workspace
+  Python suite passed 157 tests; Ruff, formatting, and diff checks passed.
+- The current base-server release binary was compared with the published
+  4.19.0 binary across three rotating pairs and 20 warm samples per workload.
+  Small, wide mixed, and near-limit HTTP reads matched schemas and response
+  lengths; no p50 or p95 pair breached the regression budget. See the
+  [final HTTP report](evidence/phase-420-http-benchmarks-final-release-local.json).
+- Final 8-client/active-16 release-profile cohorts completed concurrent and
+  final paced one-million-row readers with both local and Quack owners, no
+  capacity rejections, clean health probes, and graceful shutdown. The [read-pool
+  report](evidence/phase-420-duckdb-v38-read-pool-local-summary.json) records
+  80.3 ops/s and 163 ms small-count p99 locally, and 79.2 ops/s and 167 ms
+  small-count p99 on Quack. Quack p99 improved 99.4% from the pre-pool cohort;
+  server and fixture-owner peak RSS was 116 MB and 66.8 MB. These measurements
+  have no approved production latency or memory budget.
+- Locally built base and DuckDB product wheels passed isolated install and
+  public-client checks; the DuckDB wheel's embedded binary also passed the
+  public DuckDB execution smoke. The current `sparkless-testing` wheel passed
+  an import check with PySpark imports blocked. The [package report](evidence/phase-420-local-package-smokes.json)
+  records wheel hashes. All local wheels retain 4.19.0 version metadata and do
+  not count as 4.20.0 release artifacts.
+- Per-change #1739–#1743 local attribution is complete. One near-limit p50 pair
+  for #1739 breached its guardrail in the first run and did not recur in the
+  repeated run; one #1741 Arrow-sharing p50 pair breached its relative limit.
+  The [attribution reports](15-duckdb-connect-backend.md#isolated-performance-attribution)
+  retain all raw timing and scheduler samples.
+- A backend-mode graceful-shutdown smoke cancelled a live Quack-backed Connect
+  query, confirmed the owner had no active query left, and recorded clean exits
+  for both server and owner ([report](evidence/phase-420-duckdb-backend-shutdown-local.json)).
+
+CI was not used. Exact 4.20.0 inventory and install checks, Linux and container
+coverage, the supported capacity/resource envelope, cross-platform and other
+partial-I/O recovery, full multi-operation cleanup, and public release
+validation remain open.
+
 ## Historical 4.17 readiness review (2026-10-27)
 
 The [2026-10-27 follow-up](READINESS_4_17_2026_10_27.md) records the additive Rust metadata API, admitted SQL parsing, functional candidate/public verification changes, and the maintainer-approved Python 3.11 minimum. The release remains **HOLD** until the published Rust consumer graph is fixed and the final candidate's complete V15–V18/V31 evidence passes. The [original review](READINESS_4_17.md) and older component results below remain historical evidence.
@@ -87,6 +136,11 @@ The [2026-10-27 follow-up](READINESS_4_17_2026_10_27.md) records the additive Ru
 | V57 | 5–8 / SS-22; before 11 | Existing local API/server behavioral parity | Local/server values/schema/errors and composition tests, aliases/operators/helpers/converted results, standard Connect plus labeled bridge, optional workers/providers/drivers, cancellation/replay/isolation and resource budgets; full default Polars native baseline |
 | V58 | 5–8 / SS-22; before 11 | Complete local SQL language on HTTP and Connect | Every locally supported query/mutation/function/type/option case; exact positional HTTP and Arrow results, nested/empty results, versioned encodings if needed, snapshots/identity/outcomes and configured I/O with zero-effect negative cases |
 | V59 | 3 / SS-23; current 4.19 before cut, public stage after publication | Local/base-server/DuckDB-server separation and breaking migration | Isolated Rust graphs/package archives; base without DuckDB/Quack; server/client installs without local engine; product selection/identity and coinstallation; removed-path checks; both product wheels/images; post-extraction feature/lifecycle/performance checks and exact candidate/public inventories |
+| V60 | 15 / [SS-24](24-optional-hudi-table-support.md#release-gates) | Apache Hudi batch read correctness | Pinned Spark/Hudi differential for snapshots, time travel, incremental and read-optimized modes across table types, versions and layouts. Exact schemas and rows, concurrent commit visibility, and explicit unsupported requests. |
+| V61 | 15 / SS-24 | Hudi lifecycle, isolation, and distribution | Configured table ownership, path confinement, bounded operations, cancellation, dependency isolation, enabled/disabled behavior, and candidate and fresh public artifacts |
+| V62 | 15 / SS-24 | Hudi cloud storage and credentials | S3, Azure Blob Storage, and Google Cloud Storage reads and writes, scoped credential lifecycle, endpoint and prefix enforcement, and I/O failure recovery |
+| V63 | 15 / SS-24 | Hudi writes and table services | All declared batch write operations, two-way Spark interoperability, compaction, rollback, archival, metadata maintenance, and commit reconciliation under failure |
+| V64 | 15 / SS-24 | Hudi Structured Streaming | Checkpointed incremental source, Hudi sink commit reconciliation, crash and restart at offset and commit boundaries, explicit retention errors, and bounded long-running behavior |
 
 ## V59: Product separation and migration
 
@@ -204,6 +258,8 @@ The [helper lifecycle matrix](RELEASE_4_19.md#sparklessconnect-helper-contract) 
 Complete the supported Phase 2 Connect server before [SS-14 / Phase 3 / 4.19](14-duckdb-data-source.md). Resolve D14, then V35 proves DuckDB source reads feeding Polars and V36 proves database ownership, snapshots, source lifecycle/resources, and independent DuckDB writer visibility. All DuckDB source writes are initially unsupported. A standalone read-only file scan cannot satisfy the live shared-owner scenarios.
 
 For [SS-15 / Phase 4 / 4.20](15-duckdb-connect-backend.md), first record exact source acceptance and freeze D15. Use the [proposed client matrix](15-duckdb-connect-backend.md#sql-plans-and-type-compatibility) to define V37 and the [transaction outcome matrix](15-duckdb-connect-backend.md#transactions-and-operation-ownership) and shared-owner fixture for V38. Rerun applicable V19–V24 per backend and supplemental V25 for each separately advertised third-party route. The [4.20 release checklist](15-duckdb-connect-backend.md#acceptance-and-release-gates) separates candidate verification from public artifact verification and also covers the independent testing and performance work.
+
+The 2026-11-06 local macOS arm64 run records the 44-case Spark 4.0.5 result/schema differential, explicit unsupported forms, write/restart evidence, release-profile load reports, isolated 420-07–420-11 attribution, and graceful shutdown cancellation of an active Quack-backed DuckDB Connect query. See the [release-profile summary](evidence/phase-420-release-profile-local-summary.json) and [SS-15 local evidence](15-duckdb-connect-backend.md#local-performance-evidence). These source/local results do not freeze D15 or close V38: exact 4.20.0 artifacts, cross-platform checks, other partial-I/O outcomes, and accepted capacity/resource budgets remain open.
 
 For both phases record exact native DuckDB/library/service/client/reference versions, ownership mode, source snapshots, semantic settings, numeric workload/resource limits, enabled features, and artifact hashes. Include source/service memory in end-to-end measurements. Run previous capability regressions, native enabled/disabled builds, isolated installs, and fresh public artifact checks at each coordinated release. These are planned gates; no evidence is passed by creating the documents. V27/V28 retain their identities while moving to Phases 5/6.
 

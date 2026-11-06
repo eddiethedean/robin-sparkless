@@ -1891,13 +1891,17 @@ impl Server {
                 execute_through_runtime(
                     &instance.execution,
                     &session,
-                    &code,
-                    action,
-                    target.as_deref(),
-                    &statement,
-                    None,
-                    limits,
-                    &token_for_work,
+                    SqlExecutionRequest {
+                        sql: code,
+                        statement: Some(statement),
+                        action: action.to_string(),
+                        target: target.clone(),
+                        projection: None,
+                        max_rows: limits.max_rows,
+                        max_result_bytes: limits.max_result_bytes,
+                        max_cell_bytes: limits.max_cell_bytes,
+                        cancellation: token_for_work.clone(),
+                    },
                 )
                 .map(|response| {
                     let receipt =
@@ -1908,13 +1912,17 @@ impl Server {
                 execute_through_runtime(
                     &instance.execution,
                     &session,
-                    &code,
-                    "read",
-                    None,
-                    &statement,
-                    projection.as_ref(),
-                    limits,
-                    &token_for_work,
+                    SqlExecutionRequest {
+                        sql: code,
+                        statement: Some(statement),
+                        action: "read".into(),
+                        target: None,
+                        projection,
+                        max_rows: limits.max_rows,
+                        max_result_bytes: limits.max_result_bytes,
+                        max_cell_bytes: limits.max_cell_bytes,
+                        cancellation: token_for_work,
+                    },
                 )
                 .map(|response| (response, None))
             };
@@ -3025,6 +3033,7 @@ fn validate_simple_identifier(name: &str) -> Result<String, (&'static str, Strin
     Ok(name.to_string())
 }
 
+#[cfg(test)]
 fn execute_statement(
     session: &SparkSession,
     sql: &str,
@@ -3053,6 +3062,7 @@ fn execute_statement(
     )
 }
 
+#[cfg(test)]
 fn execute_statement_with_parsed_statement(
     session: &SparkSession,
     action: &str,
@@ -3177,6 +3187,11 @@ impl ExecutionPort for PolarsSqlExecution {
         session: &EngineSessionHandle,
         request: SqlExecutionRequest,
     ) -> Result<SqlExecutionResult, ExecutionError> {
+        // The prepared-statement route bypasses the ordinary SQL wrapper, so arm the same
+        // deterministic coordination hooks before executing the already-parsed request.
+        #[cfg(test)]
+        robin_sparkless_polars::sql::test_hooks::arm_for_query(&request.sql);
+
         let session = session
             .downcast_ref::<SparkSession>("polars")
             .ok_or_else(|| ExecutionError {
@@ -3223,30 +3238,11 @@ impl ExecutionPort for PolarsSqlExecution {
 fn execute_through_runtime(
     runtime: &ServerRuntime<SessionLifetime>,
     session: &SparkSession,
-    sql: &str,
-    action: &str,
-    target: Option<&str>,
-    statement: &SparkStatement,
-    projection: Option<&SqlProjectionMetadata>,
-    limits: ExecutionLimits,
-    cancellation: &CancellationToken,
+    request: SqlExecutionRequest,
 ) -> Result<ExecutionOutput, ExecutionFailure> {
     let handle = EngineSessionHandle::new("polars", session.clone());
     runtime
-        .execute_sql(
-            &handle,
-            SqlExecutionRequest {
-                sql: sql.to_string(),
-                statement: Some(statement.clone()),
-                action: action.to_string(),
-                target: target.map(str::to_string),
-                projection: projection.cloned(),
-                max_rows: limits.max_rows,
-                max_result_bytes: limits.max_result_bytes,
-                max_cell_bytes: limits.max_cell_bytes,
-                cancellation: cancellation.clone(),
-            },
-        )
+        .execute_sql(&handle, request)
         .map(|response| ExecutionOutput {
             payload: response.payload,
             encoded_json: response.encoded_json,

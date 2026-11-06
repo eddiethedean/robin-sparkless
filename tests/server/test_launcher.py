@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import sys
 import textwrap
 from types import ModuleType
@@ -565,6 +566,39 @@ def test_launcher_rejects_wrong_control_protocol(tmp_path):
     }
     with pytest.raises(SparklessServerError, match="control protocol"):
         common_module._validate_ready(record)
+
+
+@pytest.mark.parametrize(
+    ("mismatch", "expected_message"),
+    [
+        ("readiness", "server execution backend is duckdb, expected polars"),
+        (
+            "capabilities",
+            "server capabilities do not identify the selected execution backend",
+        ),
+    ],
+)
+def test_launcher_rejects_readiness_backend_disagreement(
+    tmp_path, monkeypatch, mismatch, expected_message
+):
+    executable = _write_fake_server(tmp_path / "sparkless-server")
+    _use_python_fake_server(monkeypatch)
+    server = SparklessServer(executable_path=executable, startup_timeout=2)
+    server.start()
+    try:
+        record = copy.deepcopy(server._ready_record)
+    finally:
+        server.stop()
+
+    if mismatch == "readiness":
+        record["execution_backend"] = "duckdb"
+    else:
+        record["capabilities"]["execution_backend"] = "duckdb"
+
+    with pytest.raises(SparklessServerError, match=expected_message):
+        common_module._validate_ready(
+            record, expected_product="base", expected_backend="polars"
+        )
 
 
 @pytest.mark.parametrize("phase", ["spawn", "diagnostics"])

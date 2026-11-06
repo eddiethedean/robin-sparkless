@@ -31,7 +31,8 @@ The current product release plan adds the native Sparkless Server to the existin
 | **4.28** | **4.28.0** | Phase 12: Spark 3.5 server compatibility and `sparkless-connect35` |
 | **4.29** | **4.29.0** | Phase 13: Spark 4.1 server compatibility and `sparkless-connect41` |
 | **4.30** | **4.30.0** | Phase 14: Spark 4.2 server compatibility and `sparkless-connect42` |
-| **4.31+** | **4.N.0** | Further conformance and performance work to be defined |
+| **4.31** | **4.31.0** | Phase 15, [optional Apache Hudi table support](plans/sparkless-server/24-optional-hudi-table-support.md) for local and cloud reads, writes, table services, and Structured Streaming |
+| **4.32+** | **4.N.0** | Further conformance and performance work to be defined |
 
 Starting with 4.16.0, every first-party package in the release inventory is published at the same version, including packages unchanged in that release. This includes `spark-sql-parser`, which moves from its independent 0.x version to **4.16.0**. Coordinated patch releases follow the same rule. The 4.16 release supports HTTP only; Spark Connect is not supported until its 4.18 gates pass. Optional worker and Delta/Unity Catalog capabilities remain opt-in.
 

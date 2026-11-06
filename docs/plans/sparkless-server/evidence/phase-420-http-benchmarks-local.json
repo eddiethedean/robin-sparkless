@@ -1,0 +1,2681 @@
+{
+  "artifacts": {
+    "baseline": {
+      "path": "/private/tmp/sparkless-phase420-baseline/sparkless-server-4.19.0",
+      "sha256": "f7e18a03e728b8b6b548e68c949c879375e00470e7a8a3baf26ea5b587ffa7ca",
+      "version": "sparkless-server 4.19.0"
+    },
+    "candidate": {
+      "path": "/Volumes/T7/coding/robin-sparkless/target/release/sparkless-server",
+      "sha256": "c673bb9e378fcfd11a83e950383d44ab7df49bb79b75f9a6d16bd2afa84cfa98",
+      "version": "sparkless-server 4.19.0"
+    }
+  },
+  "byte_limit_case": {
+    "health_and_statement_probes_succeeded": true,
+    "near_limit_response_bytes": 8000525,
+    "over_limit_error": {
+      "ename": "QueryError",
+      "evalue": "user error: serialized result exceeds the configured byte limit"
+    }
+  },
+  "command": [
+    "/tmp/sparkless-phase420-client-py311/bin/python",
+    "tests/connect/benchmark_phase420_http.py",
+    "--baseline-bin",
+    "/tmp/sparkless-phase420-baseline/sparkless-server-4.19.0",
+    "--server-bin",
+    "target/release/sparkless-server",
+    "--output",
+    "/tmp/sparkless-phase420-perf/http-paired-v4"
+  ],
+  "iterations_per_workload": 20,
+  "pairs": [
+    {
+      "baseline": {
+        "measurements": [
+          {
+            "p50_ms": 0.29308279044926167,
+            "p95_ms": 0.49591599963605404,
+            "p99_ms": 1.5695001929998398,
+            "response_bytes": 162,
+            "sample_count": 20,
+            "samples_ms": [
+              1.5695001929998398,
+              0.4674170631915331,
+              0.45920792035758495,
+              0.49591599963605404,
+              0.3597498871386051,
+              0.3129590768367052,
+              0.38816710002720356,
+              0.28000003658235073,
+              0.29308279044926167,
+              0.2556669060140848,
+              0.3392500802874565,
+              0.30170800164341927,
+              0.31704106368124485,
+              0.25995890609920025,
+              0.2887500450015068,
+              0.2465830184519291,
+              0.2290841657668352,
+              0.2685829531401396,
+              0.23725000210106373,
+              0.24058413691818714
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "result",
+                  "nullable": false,
+                  "type": "integer"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.009999999999999998,
+            "server_peak_rss_bytes_observed": 25001984,
+            "server_samples": 1,
+            "sql": "SELECT 1 AS result",
+            "workload": "small_read"
+          },
+          {
+            "p50_ms": 1.0861670598387718,
+            "p95_ms": 1.2636659666895866,
+            "p99_ms": 2.2857501171529293,
+            "response_bytes": 2356,
+            "sample_count": 20,
+            "samples_ms": [
+              2.2857501171529293,
+              1.2636659666895866,
+              1.1221671011298895,
+              1.0537079069763422,
+              1.0861670598387718,
+              1.0382500477135181,
+              1.051875064149499,
+              1.0383750777691603,
+              1.035124994814396,
+              1.1458341032266617,
+              1.0720000136643648,
+              1.0929580312222242,
+              1.2270831502974033,
+              1.1816250625997782,
+              1.0737499687820673,
+              1.110791927203536,
+              1.0518329218029976,
+              1.0979999788105488,
+              1.0729169007390738,
+              1.1120419949293137
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "value_0",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_0",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_2",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_3",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_4",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_5",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_6",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_7",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_8",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_9",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_10",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_11",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_12",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_13",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_14",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_15",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_16",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_17",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_18",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_19",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_20",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_21",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_22",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_23",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_24",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_25",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_26",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_27",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_28",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_29",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_30",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_31",
+                  "nullable": false,
+                  "type": "string"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.05,
+            "server_peak_rss_bytes_observed": 36225024,
+            "server_samples": 1,
+            "sql": "SELECT CAST(1 AS BIGINT) AS value_0, CAST(NULL AS STRING) AS value_0, TRUE AS value_2, '\u754c' AS value_3, CAST(1 AS BIGINT) AS value_4, CAST(NULL AS STRING) AS value_5, TRUE AS value_6, '\u754c' AS value_7, CAST(1 AS BIGINT) AS value_8, CAST(NULL AS STRING) AS value_9, TRUE AS value_10, '\u754c' AS value_11, CAST(1 AS BIGINT) AS value_12, CAST(NULL AS STRING) AS value_13, TRUE AS value_14, '\u754c' AS value_15, CAST(1 AS BIGINT) AS value_16, CAST(NULL AS STRING) AS value_17, TRUE AS value_18, '\u754c' AS value_19, CAST(1 AS BIGINT) AS value_20, CAST(NULL AS STRING) AS value_21, TRUE AS value_22, '\u754c' AS value_23, CAST(1 AS BIGINT) AS value_24, CAST(NULL AS STRING) AS value_25, TRUE AS value_26, '\u754c' AS value_27, CAST(1 AS BIGINT) AS value_28, CAST(NULL AS STRING) AS value_29, TRUE AS value_30, '\u754c' AS value_31",
+            "workload": "wide_mixed_read"
+          },
+          {
+            "p50_ms": 10.356959188356996,
+            "p95_ms": 12.284165946766734,
+            "p99_ms": 12.63266708701849,
+            "response_bytes": 8000525,
+            "sample_count": 20,
+            "samples_ms": [
+              12.284165946766734,
+              9.913957910612226,
+              9.939375100657344,
+              10.688874870538712,
+              10.298166889697313,
+              10.356959188356996,
+              10.673625161871314,
+              12.110291980206966,
+              10.789541993290186,
+              10.103791952133179,
+              10.988958878442645,
+              10.13087504543364,
+              10.364333167672157,
+              10.062208166345954,
+              12.63266708701849,
+              10.45545912347734,
+              9.955417132005095,
+              10.083707980811596,
+              10.496250120922923,
+              9.993375046178699
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "id",
+                  "nullable": true,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "payload",
+                  "nullable": true,
+                  "type": "string"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.24999999999999997,
+            "server_peak_rss_bytes_observed": 438386688,
+            "server_samples": 3,
+            "sql": "SELECT id, payload FROM phase420_payload WHERE id < 40 ORDER BY id",
+            "workload": "near_result_limit"
+          }
+        ],
+        "over_limit_error": {
+          "ename": "QueryError",
+          "evalue": "user error: serialized result exceeds the configured byte limit"
+        },
+        "progress_during_near_limit": {
+          "health_latency_p50_ms": 0.24804100394248962,
+          "health_latency_p95_ms": 0.5591660737991333,
+          "health_requests": 4,
+          "http_statement_latency_p50_ms": 0.6752088665962219,
+          "http_statement_latency_p95_ms": 0.8227499201893806,
+          "http_statements": 2,
+          "probe_errors": []
+        },
+        "server_command": [
+          "/private/tmp/sparkless-phase420-baseline/sparkless-server-4.19.0",
+          "control",
+          "--host",
+          "127.0.0.1",
+          "--port",
+          "0",
+          "--connect-host",
+          "127.0.0.1",
+          "--connect-port",
+          "0"
+        ],
+        "server_configuration": {
+          "SPARKLESS_ARROW_TRACE": "1",
+          "SPARKLESS_BODY_READ_TIMEOUT_MS": "10000",
+          "SPARKLESS_CONNECT_TRACE": "1",
+          "SPARKLESS_MAX_ACTIVE_OPERATIONS": "2",
+          "SPARKLESS_MAX_CELL_BYTES": "1048576",
+          "SPARKLESS_MAX_MUTATION_BYTES": "4194304",
+          "SPARKLESS_MAX_MUTATION_RECORDS": "1024",
+          "SPARKLESS_MAX_PENDING_OPERATIONS": "16",
+          "SPARKLESS_MAX_RANGE_ROWS": "10000000",
+          "SPARKLESS_MAX_REQUEST_BYTES": "1048576",
+          "SPARKLESS_MAX_RESULT_BYTES": "8388608",
+          "SPARKLESS_MAX_RESULT_ROWS": "10000",
+          "SPARKLESS_MAX_SESSIONS": "64",
+          "SPARKLESS_MAX_SQL_BYTES": "262144",
+          "SPARKLESS_QUEUE_TIMEOUT_MS": "5000",
+          "SPARKLESS_RESPONSE_TIMEOUT_MS": "60000",
+          "SPARKLESS_SESSION_IDLE_TTL_MS": "900000"
+        },
+        "server_shutdown": {
+          "acknowledged": true,
+          "control_protocol_version": 2,
+          "exit_code": 0,
+          "graceful": true,
+          "rust_global_allocator": null,
+          "seconds": 0.01063824980519712
+        }
+      },
+      "candidate": {
+        "measurements": [
+          {
+            "p50_ms": 0.31466712243855,
+            "p95_ms": 0.4384999629110098,
+            "p99_ms": 1.5514588449150324,
+            "response_bytes": 162,
+            "sample_count": 20,
+            "samples_ms": [
+              1.5514588449150324,
+              0.4384999629110098,
+              0.3797500394284725,
+              0.324582913890481,
+              0.28391601517796516,
+              0.25158305652439594,
+              0.2436661161482334,
+              0.31466712243855,
+              0.31533301807940006,
+              0.2986248582601547,
+              0.33391593024134636,
+              0.2804161049425602,
+              0.3171658609062433,
+              0.3086249344050884,
+              0.29345788061618805,
+              0.2566669136285782,
+              0.38041709922254086,
+              0.3839170094579458,
+              0.348040834069252,
+              0.3064158372581005
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "result",
+                  "nullable": false,
+                  "type": "integer"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.02,
+            "server_peak_rss_bytes_observed": 25755648,
+            "server_samples": 1,
+            "sql": "SELECT 1 AS result",
+            "workload": "small_read"
+          },
+          {
+            "p50_ms": 0.9899588767439127,
+            "p95_ms": 1.1325001250952482,
+            "p99_ms": 2.3246249184012413,
+            "response_bytes": 2356,
+            "sample_count": 20,
+            "samples_ms": [
+              2.3246249184012413,
+              1.1325001250952482,
+              1.0209169704467058,
+              0.9899588767439127,
+              0.9789587929844856,
+              1.0475420858711004,
+              0.9976660367101431,
+              0.9597500320523977,
+              1.0024579241871834,
+              1.0062919463962317,
+              0.9432081133127213,
+              0.926207983866334,
+              0.9472910314798355,
+              0.9960411116480827,
+              0.8965421002358198,
+              0.9630410932004452,
+              1.0177921503782272,
+              1.010791165754199,
+              0.9348748717457056,
+              0.9632089640945196
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "value_0",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_0",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_2",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_3",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_4",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_5",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_6",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_7",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_8",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_9",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_10",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_11",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_12",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_13",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_14",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_15",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_16",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_17",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_18",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_19",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_20",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_21",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_22",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_23",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_24",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_25",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_26",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_27",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_28",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_29",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_30",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_31",
+                  "nullable": false,
+                  "type": "string"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.049999999999999996,
+            "server_peak_rss_bytes_observed": 37289984,
+            "server_samples": 1,
+            "sql": "SELECT CAST(1 AS BIGINT) AS value_0, CAST(NULL AS STRING) AS value_0, TRUE AS value_2, '\u754c' AS value_3, CAST(1 AS BIGINT) AS value_4, CAST(NULL AS STRING) AS value_5, TRUE AS value_6, '\u754c' AS value_7, CAST(1 AS BIGINT) AS value_8, CAST(NULL AS STRING) AS value_9, TRUE AS value_10, '\u754c' AS value_11, CAST(1 AS BIGINT) AS value_12, CAST(NULL AS STRING) AS value_13, TRUE AS value_14, '\u754c' AS value_15, CAST(1 AS BIGINT) AS value_16, CAST(NULL AS STRING) AS value_17, TRUE AS value_18, '\u754c' AS value_19, CAST(1 AS BIGINT) AS value_20, CAST(NULL AS STRING) AS value_21, TRUE AS value_22, '\u754c' AS value_23, CAST(1 AS BIGINT) AS value_24, CAST(NULL AS STRING) AS value_25, TRUE AS value_26, '\u754c' AS value_27, CAST(1 AS BIGINT) AS value_28, CAST(NULL AS STRING) AS value_29, TRUE AS value_30, '\u754c' AS value_31",
+            "workload": "wide_mixed_read"
+          },
+          {
+            "p50_ms": 7.31116603128612,
+            "p95_ms": 8.897791849449277,
+            "p99_ms": 10.516291949898005,
+            "response_bytes": 8000525,
+            "sample_count": 20,
+            "samples_ms": [
+              10.516291949898005,
+              7.7072500716894865,
+              7.4899999890476465,
+              7.482375018298626,
+              6.903457920998335,
+              6.671207956969738,
+              6.615832913666964,
+              7.175584090873599,
+              7.610250031575561,
+              8.897791849449277,
+              7.155665894970298,
+              7.167665986344218,
+              7.31116603128612,
+              7.369583006948233,
+              7.238542195409536,
+              7.393417181447148,
+              6.391750182956457,
+              6.693792063742876,
+              8.746457984670997,
+              7.675624918192625
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "id",
+                  "nullable": true,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "payload",
+                  "nullable": true,
+                  "type": "string"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.19,
+            "server_peak_rss_bytes_observed": 272728064,
+            "server_samples": 3,
+            "sql": "SELECT id, payload FROM phase420_payload WHERE id < 40 ORDER BY id",
+            "workload": "near_result_limit"
+          }
+        ],
+        "over_limit_error": {
+          "ename": "QueryError",
+          "evalue": "user error: serialized result exceeds the configured byte limit"
+        },
+        "progress_during_near_limit": {
+          "health_latency_p50_ms": 0.2621249295771122,
+          "health_latency_p95_ms": 0.316874822601676,
+          "health_requests": 3,
+          "http_statement_latency_p50_ms": 0.5987081676721573,
+          "http_statement_latency_p95_ms": 0.7380829192698002,
+          "http_statements": 2,
+          "probe_errors": []
+        },
+        "server_command": [
+          "/Volumes/T7/coding/robin-sparkless/target/release/sparkless-server",
+          "control",
+          "--host",
+          "127.0.0.1",
+          "--port",
+          "0",
+          "--connect-host",
+          "127.0.0.1",
+          "--connect-port",
+          "0"
+        ],
+        "server_configuration": {
+          "SPARKLESS_ARROW_TRACE": "1",
+          "SPARKLESS_BODY_READ_TIMEOUT_MS": "10000",
+          "SPARKLESS_CONNECT_TRACE": "1",
+          "SPARKLESS_MAX_ACTIVE_OPERATIONS": "2",
+          "SPARKLESS_MAX_CELL_BYTES": "1048576",
+          "SPARKLESS_MAX_MUTATION_BYTES": "4194304",
+          "SPARKLESS_MAX_MUTATION_RECORDS": "1024",
+          "SPARKLESS_MAX_PENDING_OPERATIONS": "16",
+          "SPARKLESS_MAX_RANGE_ROWS": "10000000",
+          "SPARKLESS_MAX_REQUEST_BYTES": "1048576",
+          "SPARKLESS_MAX_RESULT_BYTES": "8388608",
+          "SPARKLESS_MAX_RESULT_ROWS": "10000",
+          "SPARKLESS_MAX_SESSIONS": "64",
+          "SPARKLESS_MAX_SQL_BYTES": "262144",
+          "SPARKLESS_QUEUE_TIMEOUT_MS": "5000",
+          "SPARKLESS_RESPONSE_TIMEOUT_MS": "60000",
+          "SPARKLESS_SESSION_IDLE_TTL_MS": "900000"
+        },
+        "server_shutdown": {
+          "acknowledged": true,
+          "control_protocol_version": 2,
+          "exit_code": 0,
+          "graceful": true,
+          "rust_global_allocator": null,
+          "seconds": 0.0047651249915361404
+        }
+      },
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "pair": 1
+    },
+    {
+      "baseline": {
+        "measurements": [
+          {
+            "p50_ms": 0.2917088568210602,
+            "p95_ms": 0.48812502063810825,
+            "p99_ms": 1.6704171430319548,
+            "response_bytes": 162,
+            "sample_count": 20,
+            "samples_ms": [
+              1.6704171430319548,
+              0.48812502063810825,
+              0.3760000690817833,
+              0.4289171192795038,
+              0.29125018045306206,
+              0.3458750434219837,
+              0.3465418703854084,
+              0.2917088568210602,
+              0.280875014141202,
+              0.30195899307727814,
+              0.3000418655574322,
+              0.2524170558899641,
+              0.24450011551380157,
+              0.2696660812944174,
+              0.2862501423805952,
+              0.404957914724946,
+              0.3018330316990614,
+              0.2783748786896467,
+              0.28016604483127594,
+              0.23799994960427284
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "result",
+                  "nullable": false,
+                  "type": "integer"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.01,
+            "server_peak_rss_bytes_observed": 25051136,
+            "server_samples": 1,
+            "sql": "SELECT 1 AS result",
+            "workload": "small_read"
+          },
+          {
+            "p50_ms": 1.1179579887539148,
+            "p95_ms": 1.2720408849418163,
+            "p99_ms": 2.5276250671595335,
+            "response_bytes": 2356,
+            "sample_count": 20,
+            "samples_ms": [
+              2.5276250671595335,
+              1.2720408849418163,
+              1.1265829671174288,
+              1.1973751243203878,
+              1.1680000461637974,
+              1.050374936312437,
+              1.076791901141405,
+              1.1344579979777336,
+              1.107624964788556,
+              1.1396671179682016,
+              1.092083053663373,
+              1.1179579887539148,
+              1.0684169828891754,
+              1.1045411229133606,
+              1.0825421195477247,
+              1.152083044871688,
+              1.1632079258561134,
+              1.1292078997939825,
+              1.0488750413060188,
+              1.060333102941513
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "value_0",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_0",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_2",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_3",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_4",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_5",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_6",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_7",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_8",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_9",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_10",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_11",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_12",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_13",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_14",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_15",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_16",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_17",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_18",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_19",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_20",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_21",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_22",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_23",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_24",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_25",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_26",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_27",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_28",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_29",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_30",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_31",
+                  "nullable": false,
+                  "type": "string"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.05,
+            "server_peak_rss_bytes_observed": 36241408,
+            "server_samples": 1,
+            "sql": "SELECT CAST(1 AS BIGINT) AS value_0, CAST(NULL AS STRING) AS value_0, TRUE AS value_2, '\u754c' AS value_3, CAST(1 AS BIGINT) AS value_4, CAST(NULL AS STRING) AS value_5, TRUE AS value_6, '\u754c' AS value_7, CAST(1 AS BIGINT) AS value_8, CAST(NULL AS STRING) AS value_9, TRUE AS value_10, '\u754c' AS value_11, CAST(1 AS BIGINT) AS value_12, CAST(NULL AS STRING) AS value_13, TRUE AS value_14, '\u754c' AS value_15, CAST(1 AS BIGINT) AS value_16, CAST(NULL AS STRING) AS value_17, TRUE AS value_18, '\u754c' AS value_19, CAST(1 AS BIGINT) AS value_20, CAST(NULL AS STRING) AS value_21, TRUE AS value_22, '\u754c' AS value_23, CAST(1 AS BIGINT) AS value_24, CAST(NULL AS STRING) AS value_25, TRUE AS value_26, '\u754c' AS value_27, CAST(1 AS BIGINT) AS value_28, CAST(NULL AS STRING) AS value_29, TRUE AS value_30, '\u754c' AS value_31",
+            "workload": "wide_mixed_read"
+          },
+          {
+            "p50_ms": 10.085999965667725,
+            "p95_ms": 10.770374909043312,
+            "p99_ms": 12.792374938726425,
+            "response_bytes": 8000525,
+            "sample_count": 20,
+            "samples_ms": [
+              12.792374938726425,
+              10.610584169626236,
+              10.710459202528,
+              10.540124960243702,
+              10.149833047762513,
+              10.028667049482465,
+              10.076167061924934,
+              10.770374909043312,
+              10.152667062357068,
+              9.88920801319182,
+              9.601667057722807,
+              9.763000067323446,
+              10.085999965667725,
+              10.454042116180062,
+              10.162167018279433,
+              10.451416950672865,
+              9.807166876271367,
+              9.797625010833144,
+              9.561042068526149,
+              9.685667231678963
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "id",
+                  "nullable": true,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "payload",
+                  "nullable": true,
+                  "type": "string"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.25,
+            "server_peak_rss_bytes_observed": 438894592,
+            "server_samples": 3,
+            "sql": "SELECT id, payload FROM phase420_payload WHERE id < 40 ORDER BY id",
+            "workload": "near_result_limit"
+          }
+        ],
+        "over_limit_error": {
+          "ename": "QueryError",
+          "evalue": "user error: serialized result exceeds the configured byte limit"
+        },
+        "progress_during_near_limit": {
+          "health_latency_p50_ms": 0.33500022254884243,
+          "health_latency_p95_ms": 1.5017078258097172,
+          "health_requests": 4,
+          "http_statement_latency_p50_ms": 0.5786248948425055,
+          "http_statement_latency_p95_ms": 0.8964578155428171,
+          "http_statements": 2,
+          "probe_errors": []
+        },
+        "server_command": [
+          "/private/tmp/sparkless-phase420-baseline/sparkless-server-4.19.0",
+          "control",
+          "--host",
+          "127.0.0.1",
+          "--port",
+          "0",
+          "--connect-host",
+          "127.0.0.1",
+          "--connect-port",
+          "0"
+        ],
+        "server_configuration": {
+          "SPARKLESS_ARROW_TRACE": "1",
+          "SPARKLESS_BODY_READ_TIMEOUT_MS": "10000",
+          "SPARKLESS_CONNECT_TRACE": "1",
+          "SPARKLESS_MAX_ACTIVE_OPERATIONS": "2",
+          "SPARKLESS_MAX_CELL_BYTES": "1048576",
+          "SPARKLESS_MAX_MUTATION_BYTES": "4194304",
+          "SPARKLESS_MAX_MUTATION_RECORDS": "1024",
+          "SPARKLESS_MAX_PENDING_OPERATIONS": "16",
+          "SPARKLESS_MAX_RANGE_ROWS": "10000000",
+          "SPARKLESS_MAX_REQUEST_BYTES": "1048576",
+          "SPARKLESS_MAX_RESULT_BYTES": "8388608",
+          "SPARKLESS_MAX_RESULT_ROWS": "10000",
+          "SPARKLESS_MAX_SESSIONS": "64",
+          "SPARKLESS_MAX_SQL_BYTES": "262144",
+          "SPARKLESS_QUEUE_TIMEOUT_MS": "5000",
+          "SPARKLESS_RESPONSE_TIMEOUT_MS": "60000",
+          "SPARKLESS_SESSION_IDLE_TTL_MS": "900000"
+        },
+        "server_shutdown": {
+          "acknowledged": true,
+          "control_protocol_version": 2,
+          "exit_code": 0,
+          "graceful": true,
+          "rust_global_allocator": null,
+          "seconds": 0.010720083024352789
+        }
+      },
+      "candidate": {
+        "measurements": [
+          {
+            "p50_ms": 0.3062079194933176,
+            "p95_ms": 0.4862078931182623,
+            "p99_ms": 1.6682499554008245,
+            "response_bytes": 162,
+            "sample_count": 20,
+            "samples_ms": [
+              1.6682499554008245,
+              0.41641690768301487,
+              0.4862078931182623,
+              0.35583297722041607,
+              0.3693751059472561,
+              0.3296670038253069,
+              0.3232499584555626,
+              0.42112497612833977,
+              0.32062502577900887,
+              0.3016670234501362,
+              0.3062079194933176,
+              0.30495901592075825,
+              0.3267920110374689,
+              0.24612504057586193,
+              0.25966716930270195,
+              0.27429102919995785,
+              0.2583330497145653,
+              0.2896671649068594,
+              0.26654102839529514,
+              0.278000021353364
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "result",
+                  "nullable": false,
+                  "type": "integer"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.01,
+            "server_peak_rss_bytes_observed": 25821184,
+            "server_samples": 1,
+            "sql": "SELECT 1 AS result",
+            "workload": "small_read"
+          },
+          {
+            "p50_ms": 0.9102500043809414,
+            "p95_ms": 1.0636660736054182,
+            "p99_ms": 2.22033285535872,
+            "response_bytes": 2356,
+            "sample_count": 20,
+            "samples_ms": [
+              2.22033285535872,
+              1.0636660736054182,
+              0.9555830620229244,
+              0.979249831289053,
+              0.9699580259621143,
+              0.8959169499576092,
+              0.9299169760197401,
+              0.9238328784704208,
+              0.8438338991254568,
+              1.0007910896092653,
+              0.9102500043809414,
+              0.8972079958766699,
+              0.91337482444942,
+              0.8526670280843973,
+              0.8909590542316437,
+              0.9138330351561308,
+              0.8823748212307692,
+              0.8316668681800365,
+              0.8797920309007168,
+              0.8769580163061619
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "value_0",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_0",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_2",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_3",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_4",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_5",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_6",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_7",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_8",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_9",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_10",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_11",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_12",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_13",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_14",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_15",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_16",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_17",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_18",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_19",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_20",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_21",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_22",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_23",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_24",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_25",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_26",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_27",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_28",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_29",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_30",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_31",
+                  "nullable": false,
+                  "type": "string"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.04000000000000001,
+            "server_peak_rss_bytes_observed": 37109760,
+            "server_samples": 1,
+            "sql": "SELECT CAST(1 AS BIGINT) AS value_0, CAST(NULL AS STRING) AS value_0, TRUE AS value_2, '\u754c' AS value_3, CAST(1 AS BIGINT) AS value_4, CAST(NULL AS STRING) AS value_5, TRUE AS value_6, '\u754c' AS value_7, CAST(1 AS BIGINT) AS value_8, CAST(NULL AS STRING) AS value_9, TRUE AS value_10, '\u754c' AS value_11, CAST(1 AS BIGINT) AS value_12, CAST(NULL AS STRING) AS value_13, TRUE AS value_14, '\u754c' AS value_15, CAST(1 AS BIGINT) AS value_16, CAST(NULL AS STRING) AS value_17, TRUE AS value_18, '\u754c' AS value_19, CAST(1 AS BIGINT) AS value_20, CAST(NULL AS STRING) AS value_21, TRUE AS value_22, '\u754c' AS value_23, CAST(1 AS BIGINT) AS value_24, CAST(NULL AS STRING) AS value_25, TRUE AS value_26, '\u754c' AS value_27, CAST(1 AS BIGINT) AS value_28, CAST(NULL AS STRING) AS value_29, TRUE AS value_30, '\u754c' AS value_31",
+            "workload": "wide_mixed_read"
+          },
+          {
+            "p50_ms": 7.205040892586112,
+            "p95_ms": 9.949333034455776,
+            "p99_ms": 10.293874889612198,
+            "response_bytes": 8000525,
+            "sample_count": 20,
+            "samples_ms": [
+              10.293874889612198,
+              7.462667068466544,
+              7.335999980568886,
+              7.071249885484576,
+              7.205040892586112,
+              7.173833902925253,
+              7.187000010162592,
+              7.385958917438984,
+              6.985291140154004,
+              9.949333034455776,
+              7.241874933242798,
+              7.3913331143558025,
+              7.500417064875364,
+              7.07670790143311,
+              7.109083933755755,
+              7.252833107486367,
+              7.149332901462913,
+              7.121833972632885,
+              9.842125000432134,
+              7.194874808192253
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "id",
+                  "nullable": true,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "payload",
+                  "nullable": true,
+                  "type": "string"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.19,
+            "server_peak_rss_bytes_observed": 255590400,
+            "server_samples": 3,
+            "sql": "SELECT id, payload FROM phase420_payload WHERE id < 40 ORDER BY id",
+            "workload": "near_result_limit"
+          }
+        ],
+        "over_limit_error": {
+          "ename": "QueryError",
+          "evalue": "user error: serialized result exceeds the configured byte limit"
+        },
+        "progress_during_near_limit": {
+          "health_latency_p50_ms": 0.23312517441809177,
+          "health_latency_p95_ms": 0.34529087133705616,
+          "health_requests": 3,
+          "http_statement_latency_p50_ms": 0.6160829216241837,
+          "http_statement_latency_p95_ms": 2.9835000168532133,
+          "http_statements": 2,
+          "probe_errors": []
+        },
+        "server_command": [
+          "/Volumes/T7/coding/robin-sparkless/target/release/sparkless-server",
+          "control",
+          "--host",
+          "127.0.0.1",
+          "--port",
+          "0",
+          "--connect-host",
+          "127.0.0.1",
+          "--connect-port",
+          "0"
+        ],
+        "server_configuration": {
+          "SPARKLESS_ARROW_TRACE": "1",
+          "SPARKLESS_BODY_READ_TIMEOUT_MS": "10000",
+          "SPARKLESS_CONNECT_TRACE": "1",
+          "SPARKLESS_MAX_ACTIVE_OPERATIONS": "2",
+          "SPARKLESS_MAX_CELL_BYTES": "1048576",
+          "SPARKLESS_MAX_MUTATION_BYTES": "4194304",
+          "SPARKLESS_MAX_MUTATION_RECORDS": "1024",
+          "SPARKLESS_MAX_PENDING_OPERATIONS": "16",
+          "SPARKLESS_MAX_RANGE_ROWS": "10000000",
+          "SPARKLESS_MAX_REQUEST_BYTES": "1048576",
+          "SPARKLESS_MAX_RESULT_BYTES": "8388608",
+          "SPARKLESS_MAX_RESULT_ROWS": "10000",
+          "SPARKLESS_MAX_SESSIONS": "64",
+          "SPARKLESS_MAX_SQL_BYTES": "262144",
+          "SPARKLESS_QUEUE_TIMEOUT_MS": "5000",
+          "SPARKLESS_RESPONSE_TIMEOUT_MS": "60000",
+          "SPARKLESS_SESSION_IDLE_TTL_MS": "900000"
+        },
+        "server_shutdown": {
+          "acknowledged": true,
+          "control_protocol_version": 2,
+          "exit_code": 0,
+          "graceful": true,
+          "rust_global_allocator": null,
+          "seconds": 0.004628957947716117
+        }
+      },
+      "order": [
+        "candidate",
+        "baseline"
+      ],
+      "pair": 2
+    },
+    {
+      "baseline": {
+        "measurements": [
+          {
+            "p50_ms": 0.30304212123155594,
+            "p95_ms": 0.4673751536756754,
+            "p99_ms": 2.6235419791191816,
+            "response_bytes": 162,
+            "sample_count": 20,
+            "samples_ms": [
+              2.6235419791191816,
+              0.4673751536756754,
+              0.32941694371402264,
+              0.36370917223393917,
+              0.4270831122994423,
+              0.3540830221027136,
+              0.3001659642904997,
+              0.27608289383351803,
+              0.36874995566904545,
+              0.30816695652902126,
+              0.34050014801323414,
+              0.2757089678198099,
+              0.287666916847229,
+              0.2956248354166746,
+              0.3204168751835823,
+              0.2512501087039709,
+              0.2837921492755413,
+              0.2965419553220272,
+              0.28675002977252007,
+              0.30304212123155594
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "result",
+                  "nullable": false,
+                  "type": "integer"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.01,
+            "server_peak_rss_bytes_observed": 25001984,
+            "server_samples": 1,
+            "sql": "SELECT 1 AS result",
+            "workload": "small_read"
+          },
+          {
+            "p50_ms": 1.1688750237226486,
+            "p95_ms": 1.3746670447289944,
+            "p99_ms": 3.183959051966667,
+            "response_bytes": 2356,
+            "sample_count": 20,
+            "samples_ms": [
+              3.183959051966667,
+              1.3746670447289944,
+              1.2204579543322325,
+              1.1643748730421066,
+              1.203959109261632,
+              1.1920419055968523,
+              1.17275002412498,
+              1.1688750237226486,
+              1.1505000293254852,
+              1.1864169500768185,
+              1.1900828685611486,
+              1.1557089164853096,
+              1.1774168815463781,
+              1.1352498549968004,
+              1.180250197649002,
+              1.1203750036656857,
+              1.121792010962963,
+              1.1322090867906809,
+              1.1061248369514942,
+              1.1431670282036066
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "value_0",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_0",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_2",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_3",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_4",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_5",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_6",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_7",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_8",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_9",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_10",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_11",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_12",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_13",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_14",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_15",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_16",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_17",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_18",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_19",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_20",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_21",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_22",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_23",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_24",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_25",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_26",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_27",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_28",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_29",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_30",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_31",
+                  "nullable": false,
+                  "type": "string"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.05,
+            "server_peak_rss_bytes_observed": 36339712,
+            "server_samples": 1,
+            "sql": "SELECT CAST(1 AS BIGINT) AS value_0, CAST(NULL AS STRING) AS value_0, TRUE AS value_2, '\u754c' AS value_3, CAST(1 AS BIGINT) AS value_4, CAST(NULL AS STRING) AS value_5, TRUE AS value_6, '\u754c' AS value_7, CAST(1 AS BIGINT) AS value_8, CAST(NULL AS STRING) AS value_9, TRUE AS value_10, '\u754c' AS value_11, CAST(1 AS BIGINT) AS value_12, CAST(NULL AS STRING) AS value_13, TRUE AS value_14, '\u754c' AS value_15, CAST(1 AS BIGINT) AS value_16, CAST(NULL AS STRING) AS value_17, TRUE AS value_18, '\u754c' AS value_19, CAST(1 AS BIGINT) AS value_20, CAST(NULL AS STRING) AS value_21, TRUE AS value_22, '\u754c' AS value_23, CAST(1 AS BIGINT) AS value_24, CAST(NULL AS STRING) AS value_25, TRUE AS value_26, '\u754c' AS value_27, CAST(1 AS BIGINT) AS value_28, CAST(NULL AS STRING) AS value_29, TRUE AS value_30, '\u754c' AS value_31",
+            "workload": "wide_mixed_read"
+          },
+          {
+            "p50_ms": 9.88862500526011,
+            "p95_ms": 16.391833079978824,
+            "p99_ms": 17.36766705289483,
+            "response_bytes": 8000525,
+            "sample_count": 20,
+            "samples_ms": [
+              14.148375019431114,
+              9.88862500526011,
+              9.63104097172618,
+              9.3278749845922,
+              17.36766705289483,
+              16.391833079978824,
+              14.643999980762601,
+              10.323667200282216,
+              9.944625198841095,
+              9.76708298549056,
+              9.841165971010923,
+              9.165874915197492,
+              10.028333868831396,
+              10.507625062018633,
+              9.38387494534254,
+              9.843874955549836,
+              9.749582968652248,
+              9.979167021811008,
+              9.834666969254613,
+              10.061500128358603
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "id",
+                  "nullable": true,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "payload",
+                  "nullable": true,
+                  "type": "string"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.26,
+            "server_peak_rss_bytes_observed": 445792256,
+            "server_samples": 3,
+            "sql": "SELECT id, payload FROM phase420_payload WHERE id < 40 ORDER BY id",
+            "workload": "near_result_limit"
+          }
+        ],
+        "over_limit_error": {
+          "ename": "QueryError",
+          "evalue": "user error: serialized result exceeds the configured byte limit"
+        },
+        "progress_during_near_limit": {
+          "health_latency_p50_ms": 0.24816696532070637,
+          "health_latency_p95_ms": 0.32008299604058266,
+          "health_requests": 4,
+          "http_statement_latency_p50_ms": 0.6428752094507217,
+          "http_statement_latency_p95_ms": 0.6586660165339708,
+          "http_statements": 2,
+          "probe_errors": []
+        },
+        "server_command": [
+          "/private/tmp/sparkless-phase420-baseline/sparkless-server-4.19.0",
+          "control",
+          "--host",
+          "127.0.0.1",
+          "--port",
+          "0",
+          "--connect-host",
+          "127.0.0.1",
+          "--connect-port",
+          "0"
+        ],
+        "server_configuration": {
+          "SPARKLESS_ARROW_TRACE": "1",
+          "SPARKLESS_BODY_READ_TIMEOUT_MS": "10000",
+          "SPARKLESS_CONNECT_TRACE": "1",
+          "SPARKLESS_MAX_ACTIVE_OPERATIONS": "2",
+          "SPARKLESS_MAX_CELL_BYTES": "1048576",
+          "SPARKLESS_MAX_MUTATION_BYTES": "4194304",
+          "SPARKLESS_MAX_MUTATION_RECORDS": "1024",
+          "SPARKLESS_MAX_PENDING_OPERATIONS": "16",
+          "SPARKLESS_MAX_RANGE_ROWS": "10000000",
+          "SPARKLESS_MAX_REQUEST_BYTES": "1048576",
+          "SPARKLESS_MAX_RESULT_BYTES": "8388608",
+          "SPARKLESS_MAX_RESULT_ROWS": "10000",
+          "SPARKLESS_MAX_SESSIONS": "64",
+          "SPARKLESS_MAX_SQL_BYTES": "262144",
+          "SPARKLESS_QUEUE_TIMEOUT_MS": "5000",
+          "SPARKLESS_RESPONSE_TIMEOUT_MS": "60000",
+          "SPARKLESS_SESSION_IDLE_TTL_MS": "900000"
+        },
+        "server_shutdown": {
+          "acknowledged": true,
+          "control_protocol_version": 2,
+          "exit_code": 0,
+          "graceful": true,
+          "rust_global_allocator": null,
+          "seconds": 0.010633458150550723
+        }
+      },
+      "candidate": {
+        "measurements": [
+          {
+            "p50_ms": 0.2744169905781746,
+            "p95_ms": 0.4073751624673605,
+            "p99_ms": 1.6828749794512987,
+            "response_bytes": 162,
+            "sample_count": 20,
+            "samples_ms": [
+              1.6828749794512987,
+              0.4073751624673605,
+              0.2898750826716423,
+              0.3214168827980757,
+              0.23699994198977947,
+              0.3328749444335699,
+              0.29966700822114944,
+              0.2972909715026617,
+              0.32408302649855614,
+              0.26712496764957905,
+              0.2770000137388706,
+              0.2728330437093973,
+              0.2677920274436474,
+              0.2744169905781746,
+              0.22429204545915127,
+              0.2897500526160002,
+              0.24424982257187366,
+              0.2560829743742943,
+              0.2691668923944235,
+              0.2636250574141741
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "result",
+                  "nullable": false,
+                  "type": "integer"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.01,
+            "server_peak_rss_bytes_observed": 25788416,
+            "server_samples": 1,
+            "sql": "SELECT 1 AS result",
+            "workload": "small_read"
+          },
+          {
+            "p50_ms": 0.8994580712169409,
+            "p95_ms": 1.0534999892115593,
+            "p99_ms": 2.1006250753998756,
+            "response_bytes": 2356,
+            "sample_count": 20,
+            "samples_ms": [
+              2.1006250753998756,
+              1.0534999892115593,
+              0.9894580580294132,
+              0.9817078243941069,
+              0.9788330644369125,
+              0.8967090398073196,
+              0.9732081089168787,
+              0.9373328648507595,
+              0.8820840157568455,
+              0.8915001526474953,
+              0.92458282597363,
+              0.8994580712169409,
+              0.8987919427454472,
+              0.9001670405268669,
+              0.8845839183777571,
+              0.893500167876482,
+              0.8872498292475939,
+              0.8911669719964266,
+              0.9029170032590628,
+              0.8733330760151148
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "value_0",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_0",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_2",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_3",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_4",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_5",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_6",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_7",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_8",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_9",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_10",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_11",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_12",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_13",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_14",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_15",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_16",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_17",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_18",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_19",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_20",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_21",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_22",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_23",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_24",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_25",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_26",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_27",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_28",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_29",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_30",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_31",
+                  "nullable": false,
+                  "type": "string"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.05,
+            "server_peak_rss_bytes_observed": 37027840,
+            "server_samples": 1,
+            "sql": "SELECT CAST(1 AS BIGINT) AS value_0, CAST(NULL AS STRING) AS value_0, TRUE AS value_2, '\u754c' AS value_3, CAST(1 AS BIGINT) AS value_4, CAST(NULL AS STRING) AS value_5, TRUE AS value_6, '\u754c' AS value_7, CAST(1 AS BIGINT) AS value_8, CAST(NULL AS STRING) AS value_9, TRUE AS value_10, '\u754c' AS value_11, CAST(1 AS BIGINT) AS value_12, CAST(NULL AS STRING) AS value_13, TRUE AS value_14, '\u754c' AS value_15, CAST(1 AS BIGINT) AS value_16, CAST(NULL AS STRING) AS value_17, TRUE AS value_18, '\u754c' AS value_19, CAST(1 AS BIGINT) AS value_20, CAST(NULL AS STRING) AS value_21, TRUE AS value_22, '\u754c' AS value_23, CAST(1 AS BIGINT) AS value_24, CAST(NULL AS STRING) AS value_25, TRUE AS value_26, '\u754c' AS value_27, CAST(1 AS BIGINT) AS value_28, CAST(NULL AS STRING) AS value_29, TRUE AS value_30, '\u754c' AS value_31",
+            "workload": "wide_mixed_read"
+          },
+          {
+            "p50_ms": 7.309125037863851,
+            "p95_ms": 9.564833017066121,
+            "p99_ms": 9.667915990576148,
+            "response_bytes": 8000525,
+            "sample_count": 20,
+            "samples_ms": [
+              9.667915990576148,
+              7.700999965891242,
+              7.216791855171323,
+              7.489250041544437,
+              7.055457914248109,
+              7.40258302539587,
+              7.217541104182601,
+              7.270167116075754,
+              7.309125037863851,
+              8.789791027083993,
+              7.402624934911728,
+              7.237708196043968,
+              7.4757921975106,
+              7.239707978442311,
+              7.259333040565252,
+              7.5253748800605536,
+              7.277249824255705,
+              7.142459042370319,
+              9.564833017066121,
+              7.368542021140456
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "id",
+                  "nullable": true,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "payload",
+                  "nullable": true,
+                  "type": "string"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.19999999999999998,
+            "server_peak_rss_bytes_observed": 274087936,
+            "server_samples": 3,
+            "sql": "SELECT id, payload FROM phase420_payload WHERE id < 40 ORDER BY id",
+            "workload": "near_result_limit"
+          }
+        ],
+        "over_limit_error": {
+          "ename": "QueryError",
+          "evalue": "user error: serialized result exceeds the configured byte limit"
+        },
+        "progress_during_near_limit": {
+          "health_latency_p50_ms": 0.24466612376272678,
+          "health_latency_p95_ms": 0.494582811370492,
+          "health_requests": 3,
+          "http_statement_latency_p50_ms": 0.5834158509969711,
+          "http_statement_latency_p95_ms": 0.6670830771327019,
+          "http_statements": 2,
+          "probe_errors": []
+        },
+        "server_command": [
+          "/Volumes/T7/coding/robin-sparkless/target/release/sparkless-server",
+          "control",
+          "--host",
+          "127.0.0.1",
+          "--port",
+          "0",
+          "--connect-host",
+          "127.0.0.1",
+          "--connect-port",
+          "0"
+        ],
+        "server_configuration": {
+          "SPARKLESS_ARROW_TRACE": "1",
+          "SPARKLESS_BODY_READ_TIMEOUT_MS": "10000",
+          "SPARKLESS_CONNECT_TRACE": "1",
+          "SPARKLESS_MAX_ACTIVE_OPERATIONS": "2",
+          "SPARKLESS_MAX_CELL_BYTES": "1048576",
+          "SPARKLESS_MAX_MUTATION_BYTES": "4194304",
+          "SPARKLESS_MAX_MUTATION_RECORDS": "1024",
+          "SPARKLESS_MAX_PENDING_OPERATIONS": "16",
+          "SPARKLESS_MAX_RANGE_ROWS": "10000000",
+          "SPARKLESS_MAX_REQUEST_BYTES": "1048576",
+          "SPARKLESS_MAX_RESULT_BYTES": "8388608",
+          "SPARKLESS_MAX_RESULT_ROWS": "10000",
+          "SPARKLESS_MAX_SESSIONS": "64",
+          "SPARKLESS_MAX_SQL_BYTES": "262144",
+          "SPARKLESS_QUEUE_TIMEOUT_MS": "5000",
+          "SPARKLESS_RESPONSE_TIMEOUT_MS": "60000",
+          "SPARKLESS_SESSION_IDLE_TTL_MS": "900000"
+        },
+        "server_shutdown": {
+          "acknowledged": true,
+          "control_protocol_version": 2,
+          "exit_code": 0,
+          "graceful": true,
+          "rust_global_allocator": null,
+          "seconds": 0.0046218750067055225
+        }
+      },
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "pair": 3
+    }
+  ],
+  "platform": "macOS-26.5.2-arm64-arm-64bit",
+  "python": "3.11.15",
+  "regression_budget": {
+    "p50": {
+      "absolute_ms": 1,
+      "relative": 0.05
+    },
+    "p95": {
+      "absolute_ms": 2,
+      "relative": 0.1
+    }
+  },
+  "schema_version": 1,
+  "source_dirty_sha256": "89667e44658a2a9503d0e4c297f8925f2bd65b5ab72835f7d53bbf3530d25588",
+  "source_revision": "0b5c59fe198b3e06595f10e8c95e843eb956c703",
+  "summary": [
+    {
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "pair": 1,
+      "workloads": [
+        {
+          "baseline_p50_ms": 0.29308279044926167,
+          "baseline_p95_ms": 0.49591599963605404,
+          "candidate_p50_ms": 0.31466712243855,
+          "candidate_p95_ms": 0.4384999629110098,
+          "guardrail_assessment": {
+            "p50_change_ms": 0.02158433198928833,
+            "p50_limit_ms": 1,
+            "p50_over_budget": false,
+            "p95_change_ms": -0.05741603672504425,
+            "p95_limit_ms": 2,
+            "p95_over_budget": false,
+            "pair": 1
+          },
+          "response_bytes": 162,
+          "server_cpu_seconds_baseline": 0.009999999999999998,
+          "server_cpu_seconds_candidate": 0.02,
+          "workload": "small_read"
+        },
+        {
+          "baseline_p50_ms": 1.0861670598387718,
+          "baseline_p95_ms": 1.2636659666895866,
+          "candidate_p50_ms": 0.9899588767439127,
+          "candidate_p95_ms": 1.1325001250952482,
+          "guardrail_assessment": {
+            "p50_change_ms": -0.09620818309485912,
+            "p50_limit_ms": 1,
+            "p50_over_budget": false,
+            "p95_change_ms": -0.13116584159433842,
+            "p95_limit_ms": 2,
+            "p95_over_budget": false,
+            "pair": 1
+          },
+          "response_bytes": 2356,
+          "server_cpu_seconds_baseline": 0.05,
+          "server_cpu_seconds_candidate": 0.049999999999999996,
+          "workload": "wide_mixed_read"
+        },
+        {
+          "baseline_p50_ms": 10.356959188356996,
+          "baseline_p95_ms": 12.284165946766734,
+          "candidate_p50_ms": 7.31116603128612,
+          "candidate_p95_ms": 8.897791849449277,
+          "guardrail_assessment": {
+            "p50_change_ms": -3.045793157070875,
+            "p50_limit_ms": 1,
+            "p50_over_budget": false,
+            "p95_change_ms": -3.386374097317457,
+            "p95_limit_ms": 2,
+            "p95_over_budget": false,
+            "pair": 1
+          },
+          "response_bytes": 8000525,
+          "server_cpu_seconds_baseline": 0.24999999999999997,
+          "server_cpu_seconds_candidate": 0.19,
+          "workload": "near_result_limit"
+        }
+      ]
+    },
+    {
+      "order": [
+        "candidate",
+        "baseline"
+      ],
+      "pair": 2,
+      "workloads": [
+        {
+          "baseline_p50_ms": 0.2917088568210602,
+          "baseline_p95_ms": 0.48812502063810825,
+          "candidate_p50_ms": 0.3062079194933176,
+          "candidate_p95_ms": 0.4862078931182623,
+          "guardrail_assessment": {
+            "p50_change_ms": 0.014499062672257423,
+            "p50_limit_ms": 1,
+            "p50_over_budget": false,
+            "p95_change_ms": -0.0019171275198459625,
+            "p95_limit_ms": 2,
+            "p95_over_budget": false,
+            "pair": 2
+          },
+          "response_bytes": 162,
+          "server_cpu_seconds_baseline": 0.01,
+          "server_cpu_seconds_candidate": 0.01,
+          "workload": "small_read"
+        },
+        {
+          "baseline_p50_ms": 1.1179579887539148,
+          "baseline_p95_ms": 1.2720408849418163,
+          "candidate_p50_ms": 0.9102500043809414,
+          "candidate_p95_ms": 1.0636660736054182,
+          "guardrail_assessment": {
+            "p50_change_ms": -0.20770798437297344,
+            "p50_limit_ms": 1,
+            "p50_over_budget": false,
+            "p95_change_ms": -0.20837481133639812,
+            "p95_limit_ms": 2,
+            "p95_over_budget": false,
+            "pair": 2
+          },
+          "response_bytes": 2356,
+          "server_cpu_seconds_baseline": 0.05,
+          "server_cpu_seconds_candidate": 0.04000000000000001,
+          "workload": "wide_mixed_read"
+        },
+        {
+          "baseline_p50_ms": 10.085999965667725,
+          "baseline_p95_ms": 10.770374909043312,
+          "candidate_p50_ms": 7.205040892586112,
+          "candidate_p95_ms": 9.949333034455776,
+          "guardrail_assessment": {
+            "p50_change_ms": -2.8809590730816126,
+            "p50_limit_ms": 1,
+            "p50_over_budget": false,
+            "p95_change_ms": -0.8210418745875359,
+            "p95_limit_ms": 2,
+            "p95_over_budget": false,
+            "pair": 2
+          },
+          "response_bytes": 8000525,
+          "server_cpu_seconds_baseline": 0.25,
+          "server_cpu_seconds_candidate": 0.19,
+          "workload": "near_result_limit"
+        }
+      ]
+    },
+    {
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "pair": 3,
+      "workloads": [
+        {
+          "baseline_p50_ms": 0.30304212123155594,
+          "baseline_p95_ms": 0.4673751536756754,
+          "candidate_p50_ms": 0.2744169905781746,
+          "candidate_p95_ms": 0.4073751624673605,
+          "guardrail_assessment": {
+            "p50_change_ms": -0.028625130653381348,
+            "p50_limit_ms": 1,
+            "p50_over_budget": false,
+            "p95_change_ms": -0.059999991208314896,
+            "p95_limit_ms": 2,
+            "p95_over_budget": false,
+            "pair": 3
+          },
+          "response_bytes": 162,
+          "server_cpu_seconds_baseline": 0.01,
+          "server_cpu_seconds_candidate": 0.01,
+          "workload": "small_read"
+        },
+        {
+          "baseline_p50_ms": 1.1688750237226486,
+          "baseline_p95_ms": 1.3746670447289944,
+          "candidate_p50_ms": 0.8994580712169409,
+          "candidate_p95_ms": 1.0534999892115593,
+          "guardrail_assessment": {
+            "p50_change_ms": -0.26941695250570774,
+            "p50_limit_ms": 1,
+            "p50_over_budget": false,
+            "p95_change_ms": -0.3211670555174351,
+            "p95_limit_ms": 2,
+            "p95_over_budget": false,
+            "pair": 3
+          },
+          "response_bytes": 2356,
+          "server_cpu_seconds_baseline": 0.05,
+          "server_cpu_seconds_candidate": 0.05,
+          "workload": "wide_mixed_read"
+        },
+        {
+          "baseline_p50_ms": 9.88862500526011,
+          "baseline_p95_ms": 16.391833079978824,
+          "candidate_p50_ms": 7.309125037863851,
+          "candidate_p95_ms": 9.564833017066121,
+          "guardrail_assessment": {
+            "p50_change_ms": -2.5794999673962593,
+            "p50_limit_ms": 1,
+            "p50_over_budget": false,
+            "p95_change_ms": -6.827000062912703,
+            "p95_limit_ms": 2,
+            "p95_over_budget": false,
+            "pair": 3
+          },
+          "response_bytes": 8000525,
+          "server_cpu_seconds_baseline": 0.26,
+          "server_cpu_seconds_candidate": 0.19999999999999998,
+          "workload": "near_result_limit"
+        }
+      ]
+    }
+  ],
+  "timestamp_utc": "2026-11-05T22:58:21.845663+00:00",
+  "warmups_per_workload": 1,
+  "workload_assessment": [
+    {
+      "median_p50_change_ms": 0.014499062672257423,
+      "median_p95_change_ms": -0.05741603672504425,
+      "p50_breached_pairs": 0,
+      "p95_breached_pairs": 0,
+      "pairs": [
+        {
+          "p50_change_ms": 0.02158433198928833,
+          "p50_limit_ms": 1,
+          "p50_over_budget": false,
+          "p95_change_ms": -0.05741603672504425,
+          "p95_limit_ms": 2,
+          "p95_over_budget": false,
+          "pair": 1
+        },
+        {
+          "p50_change_ms": 0.014499062672257423,
+          "p50_limit_ms": 1,
+          "p50_over_budget": false,
+          "p95_change_ms": -0.0019171275198459625,
+          "p95_limit_ms": 2,
+          "p95_over_budget": false,
+          "pair": 2
+        },
+        {
+          "p50_change_ms": -0.028625130653381348,
+          "p50_limit_ms": 1,
+          "p50_over_budget": false,
+          "p95_change_ms": -0.059999991208314896,
+          "p95_limit_ms": 2,
+          "p95_over_budget": false,
+          "pair": 3
+        }
+      ],
+      "workload": "small_read"
+    },
+    {
+      "median_p50_change_ms": -0.20770798437297344,
+      "median_p95_change_ms": -0.20837481133639812,
+      "p50_breached_pairs": 0,
+      "p95_breached_pairs": 0,
+      "pairs": [
+        {
+          "p50_change_ms": -0.09620818309485912,
+          "p50_limit_ms": 1,
+          "p50_over_budget": false,
+          "p95_change_ms": -0.13116584159433842,
+          "p95_limit_ms": 2,
+          "p95_over_budget": false,
+          "pair": 1
+        },
+        {
+          "p50_change_ms": -0.20770798437297344,
+          "p50_limit_ms": 1,
+          "p50_over_budget": false,
+          "p95_change_ms": -0.20837481133639812,
+          "p95_limit_ms": 2,
+          "p95_over_budget": false,
+          "pair": 2
+        },
+        {
+          "p50_change_ms": -0.26941695250570774,
+          "p50_limit_ms": 1,
+          "p50_over_budget": false,
+          "p95_change_ms": -0.3211670555174351,
+          "p95_limit_ms": 2,
+          "p95_over_budget": false,
+          "pair": 3
+        }
+      ],
+      "workload": "wide_mixed_read"
+    },
+    {
+      "median_p50_change_ms": -2.8809590730816126,
+      "median_p95_change_ms": -3.386374097317457,
+      "p50_breached_pairs": 0,
+      "p95_breached_pairs": 0,
+      "pairs": [
+        {
+          "p50_change_ms": -3.045793157070875,
+          "p50_limit_ms": 1,
+          "p50_over_budget": false,
+          "p95_change_ms": -3.386374097317457,
+          "p95_limit_ms": 2,
+          "p95_over_budget": false,
+          "pair": 1
+        },
+        {
+          "p50_change_ms": -2.8809590730816126,
+          "p50_limit_ms": 1,
+          "p50_over_budget": false,
+          "p95_change_ms": -0.8210418745875359,
+          "p95_limit_ms": 2,
+          "p95_over_budget": false,
+          "pair": 2
+        },
+        {
+          "p50_change_ms": -2.5794999673962593,
+          "p50_limit_ms": 1,
+          "p50_over_budget": false,
+          "p95_change_ms": -6.827000062912703,
+          "p95_limit_ms": 2,
+          "p95_over_budget": false,
+          "pair": 3
+        }
+      ],
+      "workload": "near_result_limit"
+    }
+  ]
+}

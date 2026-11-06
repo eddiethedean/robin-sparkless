@@ -1,0 +1,43 @@
+{
+  "base_revision": "0b5c59fe198b3e06595f10e8c95e843eb956c703",
+  "fault_injection": {
+    "command": "trap '' XFSZ; ulimit -f 8192; target/release/deps/robin_sparkless_duckdb-7769d4ca3410331b execution::tests::storage_write_failure_during_commit_returns_unknown --exact --ignored --nocapture",
+    "payload": "32 MiB of high-entropy SHA-256 hex in a transaction-local VARCHAR value",
+    "post_fault_recovery": {
+      "payload_bytes": 0,
+      "receipts": 0,
+      "reopened_database": true,
+      "rows": 0
+    },
+    "result": "passed; DuckDB COMMIT failed to write the transaction WAL with File too large, Sparkless returned an unknown-outcome error, and reopening the database showed no committed row or receipt",
+    "rlimit_fsize_bytes": 4194304,
+    "sigxfsz": "ignored so the failed file write returns EFBIG rather than terminating the isolated test process",
+    "test": "execution::tests::storage_write_failure_during_commit_returns_unknown",
+    "test_binary_build_command": "cargo test --release --locked -p robin-sparkless-duckdb --no-run",
+    "test_binary_sha256": "446b1e3b95690ccbf328af542572f09ccadf18627dd50a2bc23f1b4147d1080c",
+    "test_output": "internal error: DuckDB transaction outcome is unknown after commit was requested: TransactionContext Error: Failed to commit: Could not write file \"<temporary .duckdb.wal>\": File too large; post-fault recovery: rows=0 receipts=0 payload_bytes=0"
+  },
+  "format_version": 1,
+  "platform": "macOS 26.5.2 arm64 (Darwin 25.5.0)",
+  "rustc": "rustc 1.93.1 (01f6ddf75 2026-02-11)",
+  "scope": [
+    "The fault uses a new temporary DuckDB database and WAL, never a repository or user database.",
+    "This proves local macOS storage-write failure classification and records the recovered row/receipt state for this RLIMIT_FSIZE fault: both are absent after reopen. It does not establish recovery after arbitrary partial I/O failures, nor does it replace supported-platform release validation."
+  ],
+  "source": {
+    "path": "crates/robin-sparkless-duckdb/src/execution.rs",
+    "sha256": "c55651bd600066cdcdec02970938bf117c60c73c314b8c844d871428b22c5d44"
+  },
+  "standard_test_run": {
+    "command": "cargo test --locked -p robin-sparkless-duckdb",
+    "failed": 0,
+    "ignored": 1,
+    "passed": 19,
+    "cleanup_regressions": [
+      "cancelled_read_pool_waiter_releases_queue_slot_and_connections_return",
+      "invalidated_checked_out_read_connection_is_closed_when_returned"
+    ]
+  },
+  "test_binary_sha256": "3253d62c9618eb52707721a79e013171df305c74f4c843fb5a871ac228b208ac",
+  "timestamp_utc": "2026-11-06T09:05:01Z"
+}

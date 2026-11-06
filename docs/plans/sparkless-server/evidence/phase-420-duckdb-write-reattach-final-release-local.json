@@ -1,0 +1,59 @@
+{
+  "format_version": 1,
+  "phase": "4.20",
+  "gate": "V38 partial: lost-response reattachment and durable replay after process restart with a local owner",
+  "result": "passed",
+  "run_date_utc": "2026-11-06",
+  "source_revision": "0b5c59fe198b3e06595f10e8c95e843eb956c703",
+  "working_tree_modified": true,
+  "platform": "macOS-26.5.2-arm64-arm-64bit",
+  "runtime": {
+    "python": "3.11.15",
+    "pyspark_client": "4.0.5",
+    "duckdb": "1.5.1",
+    "grpcio": "1.85.0"
+  },
+  "server": {
+    "path": "target/release/sparkless-server-duckdb",
+    "sha256": "06286564b7b10890b6a6d98fad6cb8276beb8292431efcb8387f1f62f764ec6d"
+  },
+  "runner": {
+    "path": "tests/connect/smoke_phase420_duckdb_write_reattach.py",
+    "sha256": "193e9bfa95d03c30a88394a0d9aac3bc41813c72dec59f128818a9516498e831"
+  },
+  "workload": {
+    "server_instance_ids": [
+      "a12fb22e-0857-4719-9122-98bd97e6c034",
+      "0385e9c6-ae9b-4a6d-adbc-50586765fb3e",
+      "f360cea4-958f-43b7-9b75-dee435e27294"
+    ],
+    "live_reattachment": {
+      "result_complete_received": true,
+      "single_application_checked": true
+    },
+    "process_restart_replay": {
+      "fault": "UNAVAILABLE after the first ExecutePlan response",
+      "server_killed": true,
+      "receipt_key": "connect-operation:63a820a5c43dbe5da99f0b1385b65565626570eaba62367f004204284a54e995",
+      "request_fingerprint": "7f054966423c15f956c6e99a97f1998a3cb7068eb6153a1397825d96901ee147",
+      "rows_before_retry": [
+        [
+          42
+        ],
+        [
+          43
+        ]
+      ],
+      "durable_receipt_before_retry": true,
+      "retry_result_complete_received": true,
+      "identity_replayed_on_new_instance": true
+    }
+  },
+  "command": "PYTHONPATH=python/server-duckdb:python/connect /tmp/sparkless-phase420-client-py311/bin/python tests/connect/smoke_phase420_duckdb_write_reattach.py --server-bin target/debug/sparkless-server-duckdb --report docs/plans/sparkless-server/evidence/phase-420-duckdb-write-reattach-local.json",
+  "limitations": [
+    "The local owner is exercised; shared Quack crash recovery is not exercised.",
+    "The process crash is injected only after the committed row and receipt are verified; this smoke does not induce a DuckDB COMMIT failure.",
+    "A separate owner-level unit test simulates a lost acknowledgement after successful COMMIT and verifies unknown-outcome replay.",
+    "This smoke does not close the complete V38 lifecycle matrix."
+  ]
+}

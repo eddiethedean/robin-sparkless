@@ -26,6 +26,8 @@ import xml.etree.ElementTree as ET
 import zipfile
 from typing import Any
 
+from benchmark_lock import benchmark_lock
+
 
 CLIENT_ENVIRONMENT_KEYS = (
     "SPARK_HOME",
@@ -557,4 +559,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    with benchmark_lock():
+        main()

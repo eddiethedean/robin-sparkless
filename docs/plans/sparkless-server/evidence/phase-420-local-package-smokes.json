@@ -1,0 +1,105 @@
+{
+  "checks": [
+    {
+      "binary_sha256": "fc7533b0887c9be002c0716cff005923e302c4c49e4b648746b9bd3d6a220b0c",
+      "command": "python3 scripts/verify_server_bin_wheel.py --wheel target/phase420-local-wheels/base/sparkless_server-4.19.0-py3-none-macosx_14_0_arm64.whl --project python/server/pyproject.toml --product base --dependency-wheel target/phase420-local-wheels/connect/sparkless_connect-4.19.0-py3-none-any.whl --platform macosx_14_0_arm64 --connect --connect-client --client-python /tmp/sparkless-phase420-client-py311/bin/python",
+      "coverage": [
+        "wheel payload and platform tag",
+        "isolated install with local sparkless-connect wheel",
+        "HTTP",
+        "optional Spark Connect",
+        "unmodified pyspark-client 4.0.5 smoke",
+        "port isolation and shutdown"
+      ],
+      "product": "base server",
+      "result": "passed",
+      "runner_sha256": "4a69edf4e27405394bb02372359b52ecefc72e00312c3f102cb3f0370c83a5fe",
+      "tool": "scripts/verify_server_bin_wheel.py"
+    },
+    {
+      "binary_sha256": "06286564b7b10890b6a6d98fad6cb8276beb8292431efcb8387f1f62f764ec6d",
+      "command": "python3 scripts/verify_server_bin_wheel.py --wheel target/phase420-local-wheels/duckdb/sparkless_server_duckdb-4.19.0-py3-none-macosx_14_0_arm64.whl --project python/server-duckdb/pyproject.toml --product duckdb --dependency-wheel target/phase420-local-wheels/connect/sparkless_connect-4.19.0-py3-none-any.whl --platform macosx_14_0_arm64 --connect --connect-client --client-python /tmp/sparkless-phase420-client-py311/bin/python",
+      "coverage": [
+        "wheel payload including executable, Quack extension, and notice",
+        "isolated install with local sparkless-connect wheel",
+        "HTTP",
+        "optional Spark Connect",
+        "unmodified pyspark-client 4.0.5 smoke",
+        "port isolation and shutdown"
+      ],
+      "product": "DuckDB server",
+      "result": "passed",
+      "runner_sha256": "4a69edf4e27405394bb02372359b52ecefc72e00312c3f102cb3f0370c83a5fe",
+      "tool": "scripts/verify_server_bin_wheel.py"
+    },
+    {
+      "binary_path": "target/phase420-local-wheels/duckdb/unpacked/sparkless_server_duckdb/sparkless-server-duckdb",
+      "binary_sha256": "06286564b7b10890b6a6d98fad6cb8276beb8292431efcb8387f1f62f764ec6d",
+      "command": "PYTHONPATH=target/phase420-local-wheels/duckdb/unpacked:python/connect /tmp/sparkless-phase420-client-py311/bin/python tests/connect/smoke_phase420_duckdb_execution.py --server-bin target/phase420-local-wheels/duckdb/unpacked/sparkless_server_duckdb/sparkless-server-duckdb",
+      "coverage": [
+        "local DuckDB owner",
+        "public Spark Connect SQL and DataFrame requests",
+        "typed create/insert",
+        "DuckDB client visibility",
+        "server restart persistence"
+      ],
+      "product": "DuckDB execution through packaged wheel binary",
+      "result": "passed",
+      "runner_sha256": "6b1f6373994cbb492338d202438282f1c2c41c9235dcddf5ca70e763e18f31c0",
+      "tool": "tests/connect/smoke_phase420_duckdb_execution.py"
+    },
+    {
+      "coverage": [
+        "wheel build",
+        "installed wheel import with PySpark imports blocked",
+        "declared dependency inspection"
+      ],
+      "declared_dependencies": [
+        "pytest>=7"
+      ],
+      "import_smoke": "isolated wheel install; a meta path finder blocked all pyspark imports; sparkless_testing imported without loading pyspark",
+      "product": "sparkless-testing",
+      "pyspark_imported": false,
+      "result": "passed",
+      "runner_sha256": "b4c8095385bc0580219a7b9cab3721c95b95e863de28e9f746b7d93bae087929",
+      "wheel_build_command": "python3 -m pip wheel --no-deps --no-build-isolation --wheel-dir target/phase420-local-wheels/testing python/testing",
+      "wheel_sha256": "45c5d3b097bf39c05dea1254cd4664ea2795dc03e53d33b21722c44de9a4a977"
+    }
+  ],
+  "format_version": 1,
+  "limitations": [
+    "All wheels use the repository 4.19.0 version metadata; no package manifest was changed for a 4.20.0 cut.",
+    "Only the macOS arm64 wheel platform was built and verified locally; Linux x86_64, container images, clean public installs, and exact 4.20.0 inventory checks remain release work.",
+    "The DuckDB wheel uses the local Quack extension build; signed release artifact verification remains separate."
+  ],
+  "phase": "4.20",
+  "platform": "macOS 26.5.2 arm64",
+  "release_profile_binaries": {
+    "base_server_sha256": "fc7533b0887c9be002c0716cff005923e302c4c49e4b648746b9bd3d6a220b0c",
+    "duckdb_server_sha256": "06286564b7b10890b6a6d98fad6cb8276beb8292431efcb8387f1f62f764ec6d",
+    "quack_extension_sha256": "ef547f01cb30412aa6dbade59bdd5254ed897ba4f113a1700e3e01e00a747935"
+  },
+  "result": "passed on macOS arm64; local wheels retain 4.19.0 package metadata and are not 4.20.0 artifacts",
+  "slice": "420-01/02/04/06 local package smoke",
+  "source_revision": "0b5c59fe198b3e06595f10e8c95e843eb956c703",
+  "timestamp_utc": "2026-11-06T08:52:07Z",
+  "wheels": {
+    "sparkless_connect": {
+      "filename": "sparkless_connect-4.19.0-py3-none-any.whl",
+      "sha256": "292b7f8c1252a58cc8268ddd975ea7ddcd1862d67fcb412ce2493df1f11bcaf4"
+    },
+    "sparkless_server_base": {
+      "filename": "sparkless_server-4.19.0-py3-none-macosx_14_0_arm64.whl",
+      "sha256": "e0fc915c731ee7d3c753777dbef1af91392e091dc0da1d641253fa08d4e1a6c7"
+    },
+    "sparkless_server_duckdb": {
+      "filename": "sparkless_server_duckdb-4.19.0-py3-none-macosx_14_0_arm64.whl",
+      "sha256": "27da2d72ae340a2c706be809cbd4fee84c2348f4feab007849e60996dab23d7f"
+    },
+    "sparkless_testing": {
+      "filename": "sparkless_testing-4.19.0-py3-none-any.whl",
+      "sha256": "45c5d3b097bf39c05dea1254cd4664ea2795dc03e53d33b21722c44de9a4a977"
+    }
+  },
+  "working_tree_modified": true
+}

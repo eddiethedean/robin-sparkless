@@ -79,7 +79,9 @@ def main() -> None:
                 collect_elapsed = time.perf_counter() - query_started
                 values = [row.id for row in rows]
                 if values != list(range(args.batch_rows)):
-                    raise AssertionError("multi-batch collection returned incorrect rows")
+                    raise AssertionError(
+                        "multi-batch collection returned incorrect rows"
+                    )
                 measurements.append(
                     {
                         "kind": "multi_batch_collect",
@@ -91,7 +93,12 @@ def main() -> None:
                     }
                 )
         else:
-            workload_names = ("small_count", "filtered_count", "preview_25", "multi_batch_collect")
+            workload_names = (
+                "small_count",
+                "filtered_count",
+                "preview_25",
+                "multi_batch_collect",
+            )
             deadline = time.perf_counter() + args.duration_seconds
             iteration = 0
             while iteration == 0 or time.perf_counter() < deadline:
@@ -101,7 +108,9 @@ def main() -> None:
                     if name == "small_count":
                         result = session.range(10).filter("id > 5").count()
                         if result != 4:
-                            raise AssertionError(f"small count was {result}, expected 4")
+                            raise AssertionError(
+                                f"small count was {result}, expected 4"
+                            )
                         measurement = {"result": result}
                     elif name == "filtered_count":
                         result = session.range(args.rows).filter("id > 5").count()
@@ -114,13 +123,17 @@ def main() -> None:
                         rows = session.range(args.rows).select("id").limit(25).collect()
                         values = [row.id for row in rows]
                         if values != list(range(25)):
-                            raise AssertionError("25-row preview returned incorrect values")
+                            raise AssertionError(
+                                "25-row preview returned incorrect values"
+                            )
                         measurement = {"row_count": len(values)}
                     else:
                         rows = session.range(args.batch_rows).select("id").collect()
                         values = [row.id for row in rows]
                         if values != list(range(args.batch_rows)):
-                            raise AssertionError("mixed collection returned incorrect values")
+                            raise AssertionError(
+                                "mixed collection returned incorrect values"
+                            )
                         measurement = {"row_count": len(values)}
                     measurements.append(
                         {
@@ -132,14 +145,18 @@ def main() -> None:
                     )
                 iteration += 1
 
+        finished = time.perf_counter()
         output = {
             "client_session_fingerprint": __import__("hashlib")
             .sha256(session._client._session_id.encode())
             .hexdigest()[:16],
             "iterations": args.iterations if args.profile == "v26" else None,
             "profile": args.profile,
-            "duration_seconds": args.duration_seconds if args.profile == "419" else None,
-            "elapsed_seconds": time.perf_counter() - started,
+            "duration_seconds": args.duration_seconds
+            if args.profile == "419"
+            else None,
+            "elapsed_seconds": finished - started,
+            "finished_monotonic_seconds": finished,
             "cpu_seconds": time.process_time() - cpu_started,
             "peak_rss_bytes": peak_rss_bytes(),
             "measurements": measurements,

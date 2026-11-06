@@ -113,7 +113,7 @@ def reject_stale_server_identity(session: SparkSession) -> dict[str, object]:
 
 def cancel_active_query(url: str) -> dict[str, object]:
     session = SparkSession.builder.remote(url).create()
-    expected_rows = 10_000_000
+    expected_rows = int(os.environ.get("SPARKLESS_PROXY_CANCEL_RANGE_ROWS", "10000000"))
     consumed = 0
     try:
         iterator = iter(session.range(expected_rows).select("id").toLocalIterator())
@@ -123,7 +123,9 @@ def cancel_active_query(url: str) -> dict[str, object]:
                 f"cancellation stream began at row {first.id}, expected 0"
             )
         consumed = 1
+        interrupt_started = time.perf_counter()
         interrupted_ids = session._client.interrupt_all()
+        interrupt_rpc_ms = (time.perf_counter() - interrupt_started) * 1_000
         if not interrupted_ids:
             raise AssertionError(
                 "proxy did not report an active query when Interrupt(all) was sent"
@@ -151,6 +153,11 @@ def cancel_active_query(url: str) -> dict[str, object]:
                     "cancelled": True,
                     "interrupted_operation_count": len(interrupted_ids),
                     "rows_consumed_before_cancellation": consumed,
+                    "interrupt_rpc_ms": interrupt_rpc_ms,
+                    "client_observed_cancellation_ms": (
+                        time.perf_counter() - interrupt_started
+                    )
+                    * 1_000,
                     "error": type(error).__name__,
                 }
         raise AssertionError("large query completed before cancellation was observed")

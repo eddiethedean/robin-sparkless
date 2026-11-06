@@ -74,7 +74,9 @@ pub mod test_hooks {
             Some((query_fragment, Box::new(hook)));
     }
 
-    pub(crate) fn arm_for_query(query: &str) {
+    /// Arm any registered query hook for a prepared request before it enters the translator.
+    #[doc(hidden)]
+    pub fn arm_for_query(query: &str) {
         let mut pending = NEXT_AFTER_FIRST_RELATION
             .lock()
             .expect("SQL test hook lock");

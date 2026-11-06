@@ -1,0 +1,53 @@
+{
+  "format_version": 1,
+  "phase": "4.20",
+  "slice": "420-01",
+  "result": "passed",
+  "platform": "macOS-26.5.2-arm64-arm-64bit",
+  "base_server": {
+    "path": "/Volumes/T7/coding/robin-sparkless/target/debug/sparkless-server",
+    "sha256": "dd2e96a267a048956ba98edb4040624f72472949a8bccebf1fc4227c86ca9e01",
+    "version": "sparkless-server 4.19.0"
+  },
+  "duckdb_server": {
+    "path": "/Volumes/T7/coding/robin-sparkless/target/debug/sparkless-server-duckdb",
+    "sha256": "5615d184a4818c5862c4a3d92b2719b21991a44c8fc1d6e011fa9072a33cd5f3",
+    "version": "sparkless-server-duckdb 4.19.0"
+  },
+  "runner_sha256": "762e99fa5b8dad5467f25228b658c1eb2c0399ab67b2881e39a8f10788881f69",
+  "probes": {
+    "base_default_polars": {
+      "server_product": "base",
+      "execution_backend": "polars",
+      "server_instance_id_matches": true,
+      "readiness_capabilities_match": true,
+      "spark_connect_supported": true
+    },
+    "duckdb_product_default_polars": {
+      "server_product": "duckdb",
+      "execution_backend": "polars",
+      "server_instance_id_matches": true,
+      "readiness_capabilities_match": true,
+      "spark_connect_supported": true
+    },
+    "duckdb_product_selected_local_owner": {
+      "server_product": "duckdb",
+      "execution_backend": "duckdb",
+      "server_instance_id_matches": true,
+      "readiness_capabilities_match": true,
+      "spark_connect_supported": true
+    },
+    "base_product_rejects_duckdb_backend": {
+      "rejected_before_readiness": true,
+      "diagnostic": "DuckDB execution requires the sparkless-server-duckdb product"
+    },
+    "duckdb_backend_requires_owner": {
+      "rejected_before_readiness": true,
+      "diagnostic": "SPARKLESS_DUCKDB_EXECUTION_OWNER is required"
+    },
+    "duckdb_backend_requires_connect": {
+      "rejected_before_readiness": true,
+      "diagnostic": "DuckDB execution requires a Spark Connect listener"
+    }
+  }
+}

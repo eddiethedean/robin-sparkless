@@ -1,0 +1,2476 @@
+{
+  "artifacts": {
+    "baseline": {
+      "path": "ephemeral single-optimization variant (binary not retained)",
+      "sha256": "7362d100cca1cfe1a500df880b9b60819df04eb7dde1666dce1efb99b2769ca8",
+      "version": "sparkless-server 4.19.0"
+    },
+    "candidate": {
+      "path": "target/release/sparkless-server",
+      "sha256": "fc7533b0887c9be002c0716cff005923e302c4c49e4b648746b9bd3d6a220b0c",
+      "version": "sparkless-server 4.19.0"
+    }
+  },
+  "command": [
+    "/tmp/sparkless-phase420-client-py311/bin/python",
+    "tests/connect/benchmark_phase420_http.py",
+    "--baseline-bin",
+    "/tmp/sparkless-phase420-attribution/sparkless-server-no-1740",
+    "--server-bin",
+    "target/release/sparkless-server",
+    "--output",
+    "/tmp/sparkless-phase420-attribution/http-no1740-vs-current",
+    "--iterations",
+    "20"
+  ],
+  "evidence_note": "Three rotating server pairs and 20 warm samples per workload. The no-optimization variant binary is not retained; its SHA-256 is recorded above. The integrated candidate binary is retained locally and its SHA-256 is recorded above.",
+  "iterations_per_workload": 20,
+  "pairs": [
+    {
+      "baseline": {
+        "measurements": [
+          {
+            "p50_ms": 0.3504171036183834,
+            "p95_ms": 0.46445801854133606,
+            "p99_ms": 0.921082915738225,
+            "response_bytes": 162,
+            "sample_count": 20,
+            "samples_ms": [
+              0.921082915738225,
+              0.42283302173018456,
+              0.3717090003192425,
+              0.46445801854133606,
+              0.39366609416902065,
+              0.35779085010290146,
+              0.3974169958382845,
+              0.3529589157551527,
+              0.37195789627730846,
+              0.3401658032089472,
+              0.32691704109311104,
+              0.3140408080071211,
+              0.3451250959187746,
+              0.3504171036183834,
+              0.30383304692804813,
+              0.35020802170038223,
+              0.3311659675091505,
+              0.3345829900354147,
+              0.298582948744297,
+              0.4065418615937233
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "result",
+                  "nullable": false,
+                  "type": "integer"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.009999999999999998,
+            "server_peak_rss_bytes_observed": 25575424,
+            "server_samples": 1,
+            "sql": "SELECT 1 AS result",
+            "workload": "small_read"
+          },
+          {
+            "p50_ms": 0.8777088951319456,
+            "p95_ms": 0.9803751017898321,
+            "p99_ms": 1.3639999087899923,
+            "response_bytes": 2356,
+            "sample_count": 20,
+            "samples_ms": [
+              1.3639999087899923,
+              0.9803751017898321,
+              0.9363749995827675,
+              0.9673750028014183,
+              0.8743340149521828,
+              0.9416250977665186,
+              0.8982501458376646,
+              0.8626659400761127,
+              0.8440830279141665,
+              0.8777088951319456,
+              0.9476668201386929,
+              0.8825000841170549,
+              0.8640838786959648,
+              0.9206251706928015,
+              0.9022080339491367,
+              0.8763750083744526,
+              0.8209580555558205,
+              0.8361248765140772,
+              0.8308747783303261,
+              0.8555410895496607
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "value_0",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_0",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_2",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_3",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_4",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_5",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_6",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_7",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_8",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_9",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_10",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_11",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_12",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_13",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_14",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_15",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_16",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_17",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_18",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_19",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_20",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_21",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_22",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_23",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_24",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_25",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_26",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_27",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_28",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_29",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_30",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_31",
+                  "nullable": false,
+                  "type": "string"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.05,
+            "server_peak_rss_bytes_observed": 36814848,
+            "server_samples": 1,
+            "sql": "SELECT CAST(1 AS BIGINT) AS value_0, CAST(NULL AS STRING) AS value_0, TRUE AS value_2, '界' AS value_3, CAST(1 AS BIGINT) AS value_4, CAST(NULL AS STRING) AS value_5, TRUE AS value_6, '界' AS value_7, CAST(1 AS BIGINT) AS value_8, CAST(NULL AS STRING) AS value_9, TRUE AS value_10, '界' AS value_11, CAST(1 AS BIGINT) AS value_12, CAST(NULL AS STRING) AS value_13, TRUE AS value_14, '界' AS value_15, CAST(1 AS BIGINT) AS value_16, CAST(NULL AS STRING) AS value_17, TRUE AS value_18, '界' AS value_19, CAST(1 AS BIGINT) AS value_20, CAST(NULL AS STRING) AS value_21, TRUE AS value_22, '界' AS value_23, CAST(1 AS BIGINT) AS value_24, CAST(NULL AS STRING) AS value_25, TRUE AS value_26, '界' AS value_27, CAST(1 AS BIGINT) AS value_28, CAST(NULL AS STRING) AS value_29, TRUE AS value_30, '界' AS value_31",
+            "workload": "wide_mixed_read"
+          },
+          {
+            "p50_ms": 9.675415931269526,
+            "p95_ms": 10.957415914162993,
+            "p99_ms": 11.139167007058859,
+            "response_bytes": 8000525,
+            "sample_count": 20,
+            "samples_ms": [
+              10.35812497138977,
+              9.893374983221292,
+              9.711166145280004,
+              9.58904204890132,
+              9.604208869859576,
+              9.779874933883548,
+              9.472500067204237,
+              9.559624828398228,
+              11.139167007058859,
+              9.74191608838737,
+              9.523625019937754,
+              9.615750052034855,
+              9.645957965403795,
+              9.624124970287085,
+              9.740750072523952,
+              9.731624973937869,
+              10.957415914162993,
+              10.07495797239244,
+              9.498707950115204,
+              9.675415931269526
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "id",
+                  "nullable": true,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "payload",
+                  "nullable": true,
+                  "type": "string"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.21999999999999997,
+            "server_peak_rss_bytes_observed": 423477248,
+            "server_samples": 3,
+            "sql": "SELECT id, payload FROM phase420_payload WHERE id < 40 ORDER BY id",
+            "workload": "near_result_limit"
+          }
+        ],
+        "over_limit_error": {
+          "ename": "QueryError",
+          "evalue": "user error: serialized result exceeds the configured byte limit"
+        },
+        "progress_during_near_limit": {
+          "health_latency_p50_ms": 0.30216691084206104,
+          "health_latency_p95_ms": 1.2728748843073845,
+          "health_requests": 3,
+          "http_statement_latency_p50_ms": 0.5206658970564604,
+          "http_statement_latency_p95_ms": 0.7110831793397665,
+          "http_statements": 2,
+          "probe_errors": []
+        },
+        "server_command": [
+          "/private/tmp/sparkless-phase420-attribution/sparkless-server-no-1740",
+          "control",
+          "--host",
+          "127.0.0.1",
+          "--port",
+          "0",
+          "--connect-host",
+          "127.0.0.1",
+          "--connect-port",
+          "0"
+        ],
+        "server_configuration": {
+          "SPARKLESS_ARROW_TRACE": "1",
+          "SPARKLESS_BODY_READ_TIMEOUT_MS": "10000",
+          "SPARKLESS_CONNECT_TRACE": "1",
+          "SPARKLESS_MAX_ACTIVE_OPERATIONS": "2",
+          "SPARKLESS_MAX_CELL_BYTES": "1048576",
+          "SPARKLESS_MAX_MUTATION_BYTES": "4194304",
+          "SPARKLESS_MAX_MUTATION_RECORDS": "1024",
+          "SPARKLESS_MAX_PENDING_OPERATIONS": "16",
+          "SPARKLESS_MAX_RANGE_ROWS": "10000000",
+          "SPARKLESS_MAX_REQUEST_BYTES": "1048576",
+          "SPARKLESS_MAX_RESULT_BYTES": "8388608",
+          "SPARKLESS_MAX_RESULT_ROWS": "10000",
+          "SPARKLESS_MAX_SESSIONS": "64",
+          "SPARKLESS_MAX_SQL_BYTES": "262144",
+          "SPARKLESS_QUEUE_TIMEOUT_MS": "5000",
+          "SPARKLESS_RESPONSE_TIMEOUT_MS": "60000",
+          "SPARKLESS_SESSION_IDLE_TTL_MS": "900000"
+        },
+        "server_shutdown": {
+          "acknowledged": true,
+          "control_protocol_version": 2,
+          "exit_code": 0,
+          "graceful": true,
+          "rust_global_allocator": null,
+          "seconds": 0.010734874987974763
+        }
+      },
+      "candidate": {
+        "measurements": [
+          {
+            "p50_ms": 0.26754196733236313,
+            "p95_ms": 0.4303748719394207,
+            "p99_ms": 1.603499986231327,
+            "response_bytes": 162,
+            "sample_count": 20,
+            "samples_ms": [
+              1.603499986231327,
+              0.4303748719394207,
+              0.40120817720890045,
+              0.3132089041173458,
+              0.29266602359712124,
+              0.32816617749631405,
+              0.275125028565526,
+              0.26204180903732777,
+              0.2766659017652273,
+              0.2587090712040663,
+              0.26754196733236313,
+              0.27820910327136517,
+              0.2655419521033764,
+              0.24754181504249573,
+              0.2449587918817997,
+              0.2450828906148672,
+              0.257125124335289,
+              0.23745791986584663,
+              0.2517090179026127,
+              0.2986248582601547
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "result",
+                  "nullable": false,
+                  "type": "integer"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.009999999999999998,
+            "server_peak_rss_bytes_observed": 25460736,
+            "server_samples": 1,
+            "sql": "SELECT 1 AS result",
+            "workload": "small_read"
+          },
+          {
+            "p50_ms": 0.8958328980952501,
+            "p95_ms": 1.000167103484273,
+            "p99_ms": 1.9306670874357224,
+            "response_bytes": 2356,
+            "sample_count": 20,
+            "samples_ms": [
+              1.9306670874357224,
+              0.9446660988032818,
+              0.8754590526223183,
+              0.9379170369356871,
+              0.8618750143796206,
+              0.9069170337170362,
+              0.8810418657958508,
+              0.9690828155726194,
+              0.9486249182373285,
+              0.931750051677227,
+              0.8420839440077543,
+              0.8569578640162945,
+              1.000167103484273,
+              0.8759580086916685,
+              0.906666973605752,
+              0.8958328980952501,
+              0.8862090762704611,
+              0.8771249558776617,
+              0.9461659938097,
+              0.8070829790085554
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "value_0",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_0",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_2",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_3",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_4",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_5",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_6",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_7",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_8",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_9",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_10",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_11",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_12",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_13",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_14",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_15",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_16",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_17",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_18",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_19",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_20",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_21",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_22",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_23",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_24",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_25",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_26",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_27",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_28",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_29",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_30",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_31",
+                  "nullable": false,
+                  "type": "string"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.05,
+            "server_peak_rss_bytes_observed": 36814848,
+            "server_samples": 1,
+            "sql": "SELECT CAST(1 AS BIGINT) AS value_0, CAST(NULL AS STRING) AS value_0, TRUE AS value_2, '界' AS value_3, CAST(1 AS BIGINT) AS value_4, CAST(NULL AS STRING) AS value_5, TRUE AS value_6, '界' AS value_7, CAST(1 AS BIGINT) AS value_8, CAST(NULL AS STRING) AS value_9, TRUE AS value_10, '界' AS value_11, CAST(1 AS BIGINT) AS value_12, CAST(NULL AS STRING) AS value_13, TRUE AS value_14, '界' AS value_15, CAST(1 AS BIGINT) AS value_16, CAST(NULL AS STRING) AS value_17, TRUE AS value_18, '界' AS value_19, CAST(1 AS BIGINT) AS value_20, CAST(NULL AS STRING) AS value_21, TRUE AS value_22, '界' AS value_23, CAST(1 AS BIGINT) AS value_24, CAST(NULL AS STRING) AS value_25, TRUE AS value_26, '界' AS value_27, CAST(1 AS BIGINT) AS value_28, CAST(NULL AS STRING) AS value_29, TRUE AS value_30, '界' AS value_31",
+            "workload": "wide_mixed_read"
+          },
+          {
+            "p50_ms": 7.423667004331946,
+            "p95_ms": 8.791625034064054,
+            "p99_ms": 8.927250048145652,
+            "response_bytes": 8000525,
+            "sample_count": 20,
+            "samples_ms": [
+              8.662499953061342,
+              7.59687484242022,
+              7.950457977131009,
+              7.600000128149986,
+              7.847541943192482,
+              7.642125012353063,
+              7.740125060081482,
+              7.399208145216107,
+              7.44283408857882,
+              8.791625034064054,
+              7.172042038291693,
+              7.363291922956705,
+              7.224750006571412,
+              7.3967918287962675,
+              7.19820917584002,
+              7.226875051856041,
+              7.423667004331946,
+              7.210500072687864,
+              7.206999929621816,
+              8.927250048145652
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "id",
+                  "nullable": true,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "payload",
+                  "nullable": true,
+                  "type": "string"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.18,
+            "server_peak_rss_bytes_observed": 252985344,
+            "server_samples": 3,
+            "sql": "SELECT id, payload FROM phase420_payload WHERE id < 40 ORDER BY id",
+            "workload": "near_result_limit"
+          }
+        ],
+        "over_limit_error": {
+          "ename": "QueryError",
+          "evalue": "user error: serialized result exceeds the configured byte limit"
+        },
+        "progress_during_near_limit": {
+          "health_latency_p50_ms": 0.31479191966354847,
+          "health_latency_p95_ms": 0.33333292230963707,
+          "health_requests": 3,
+          "http_statement_latency_p50_ms": 0.5662089679390192,
+          "http_statement_latency_p95_ms": 1.8895829562097788,
+          "http_statements": 2,
+          "probe_errors": []
+        },
+        "server_command": [
+          "/Volumes/T7/coding/robin-sparkless/target/release/sparkless-server",
+          "control",
+          "--host",
+          "127.0.0.1",
+          "--port",
+          "0",
+          "--connect-host",
+          "127.0.0.1",
+          "--connect-port",
+          "0"
+        ],
+        "server_configuration": {
+          "SPARKLESS_ARROW_TRACE": "1",
+          "SPARKLESS_BODY_READ_TIMEOUT_MS": "10000",
+          "SPARKLESS_CONNECT_TRACE": "1",
+          "SPARKLESS_MAX_ACTIVE_OPERATIONS": "2",
+          "SPARKLESS_MAX_CELL_BYTES": "1048576",
+          "SPARKLESS_MAX_MUTATION_BYTES": "4194304",
+          "SPARKLESS_MAX_MUTATION_RECORDS": "1024",
+          "SPARKLESS_MAX_PENDING_OPERATIONS": "16",
+          "SPARKLESS_MAX_RANGE_ROWS": "10000000",
+          "SPARKLESS_MAX_REQUEST_BYTES": "1048576",
+          "SPARKLESS_MAX_RESULT_BYTES": "8388608",
+          "SPARKLESS_MAX_RESULT_ROWS": "10000",
+          "SPARKLESS_MAX_SESSIONS": "64",
+          "SPARKLESS_MAX_SQL_BYTES": "262144",
+          "SPARKLESS_QUEUE_TIMEOUT_MS": "5000",
+          "SPARKLESS_RESPONSE_TIMEOUT_MS": "60000",
+          "SPARKLESS_SESSION_IDLE_TTL_MS": "900000"
+        },
+        "server_shutdown": {
+          "acknowledged": true,
+          "control_protocol_version": 2,
+          "exit_code": 0,
+          "graceful": true,
+          "rust_global_allocator": null,
+          "seconds": 0.00468866596929729
+        }
+      },
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "pair": 1
+    },
+    {
+      "baseline": {
+        "measurements": [
+          {
+            "p50_ms": 0.3383329603821039,
+            "p95_ms": 0.5398751236498356,
+            "p99_ms": 1.4765001833438873,
+            "response_bytes": 162,
+            "sample_count": 20,
+            "samples_ms": [
+              1.4765001833438873,
+              0.5398751236498356,
+              0.4212080966681242,
+              0.34024985507130623,
+              0.4342920146882534,
+              0.3529579844325781,
+              0.33187493681907654,
+              0.3267501015216112,
+              0.34808297641575336,
+              0.4085828550159931,
+              0.435834052041173,
+              0.3383329603821039,
+              0.3166249953210354,
+              0.31154206953942776,
+              0.3470000810921192,
+              0.32950006425380707,
+              0.31595793552696705,
+              0.3200420178472996,
+              0.31166686676442623,
+              0.31441706232726574
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "result",
+                  "nullable": false,
+                  "type": "integer"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.01,
+            "server_peak_rss_bytes_observed": 25460736,
+            "server_samples": 1,
+            "sql": "SELECT 1 AS result",
+            "workload": "small_read"
+          },
+          {
+            "p50_ms": 0.8952079806476831,
+            "p95_ms": 0.9721249807626009,
+            "p99_ms": 1.844584010541439,
+            "response_bytes": 2356,
+            "sample_count": 20,
+            "samples_ms": [
+              1.844584010541439,
+              0.9322080295532942,
+              0.8564169984310865,
+              0.851290998980403,
+              0.9313751943409443,
+              0.9127501398324966,
+              0.9287090506404638,
+              0.8764169178903103,
+              0.8995421230792999,
+              0.8865420240908861,
+              0.8665001951158047,
+              0.8306249510496855,
+              0.8255830034613609,
+              0.8952079806476831,
+              0.8707907982170582,
+              0.9262498933821917,
+              0.9721249807626009,
+              0.9649589192122221,
+              0.9688329882919788,
+              0.8704580832272768
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "value_0",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_0",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_2",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_3",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_4",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_5",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_6",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_7",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_8",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_9",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_10",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_11",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_12",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_13",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_14",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_15",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_16",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_17",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_18",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_19",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_20",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_21",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_22",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_23",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_24",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_25",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_26",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_27",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_28",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_29",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_30",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_31",
+                  "nullable": false,
+                  "type": "string"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.05,
+            "server_peak_rss_bytes_observed": 36749312,
+            "server_samples": 1,
+            "sql": "SELECT CAST(1 AS BIGINT) AS value_0, CAST(NULL AS STRING) AS value_0, TRUE AS value_2, '界' AS value_3, CAST(1 AS BIGINT) AS value_4, CAST(NULL AS STRING) AS value_5, TRUE AS value_6, '界' AS value_7, CAST(1 AS BIGINT) AS value_8, CAST(NULL AS STRING) AS value_9, TRUE AS value_10, '界' AS value_11, CAST(1 AS BIGINT) AS value_12, CAST(NULL AS STRING) AS value_13, TRUE AS value_14, '界' AS value_15, CAST(1 AS BIGINT) AS value_16, CAST(NULL AS STRING) AS value_17, TRUE AS value_18, '界' AS value_19, CAST(1 AS BIGINT) AS value_20, CAST(NULL AS STRING) AS value_21, TRUE AS value_22, '界' AS value_23, CAST(1 AS BIGINT) AS value_24, CAST(NULL AS STRING) AS value_25, TRUE AS value_26, '界' AS value_27, CAST(1 AS BIGINT) AS value_28, CAST(NULL AS STRING) AS value_29, TRUE AS value_30, '界' AS value_31",
+            "workload": "wide_mixed_read"
+          },
+          {
+            "p50_ms": 9.716791100800037,
+            "p95_ms": 10.954333003610373,
+            "p99_ms": 11.255749966949224,
+            "response_bytes": 8000525,
+            "sample_count": 20,
+            "samples_ms": [
+              10.954333003610373,
+              9.607417043298483,
+              9.74162481725216,
+              9.77162504568696,
+              9.440000168979168,
+              9.595375042408705,
+              9.716624859720469,
+              9.988666977733374,
+              9.801291860640049,
+              9.604542050510645,
+              9.647791972383857,
+              9.465292096138,
+              9.940290823578835,
+              10.037000058218837,
+              9.758208878338337,
+              11.255749966949224,
+              9.716791100800037,
+              9.72087518312037,
+              9.58604202605784,
+              9.618332842364907
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "id",
+                  "nullable": true,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "payload",
+                  "nullable": true,
+                  "type": "string"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.23,
+            "server_peak_rss_bytes_observed": 424280064,
+            "server_samples": 3,
+            "sql": "SELECT id, payload FROM phase420_payload WHERE id < 40 ORDER BY id",
+            "workload": "near_result_limit"
+          }
+        ],
+        "over_limit_error": {
+          "ename": "QueryError",
+          "evalue": "user error: serialized result exceeds the configured byte limit"
+        },
+        "progress_during_near_limit": {
+          "health_latency_p50_ms": 0.28016697615385056,
+          "health_latency_p95_ms": 0.3167910035699606,
+          "health_requests": 3,
+          "http_statement_latency_p50_ms": 0.5422921385616064,
+          "http_statement_latency_p95_ms": 0.5944999866187572,
+          "http_statements": 2,
+          "probe_errors": []
+        },
+        "server_command": [
+          "/private/tmp/sparkless-phase420-attribution/sparkless-server-no-1740",
+          "control",
+          "--host",
+          "127.0.0.1",
+          "--port",
+          "0",
+          "--connect-host",
+          "127.0.0.1",
+          "--connect-port",
+          "0"
+        ],
+        "server_configuration": {
+          "SPARKLESS_ARROW_TRACE": "1",
+          "SPARKLESS_BODY_READ_TIMEOUT_MS": "10000",
+          "SPARKLESS_CONNECT_TRACE": "1",
+          "SPARKLESS_MAX_ACTIVE_OPERATIONS": "2",
+          "SPARKLESS_MAX_CELL_BYTES": "1048576",
+          "SPARKLESS_MAX_MUTATION_BYTES": "4194304",
+          "SPARKLESS_MAX_MUTATION_RECORDS": "1024",
+          "SPARKLESS_MAX_PENDING_OPERATIONS": "16",
+          "SPARKLESS_MAX_RANGE_ROWS": "10000000",
+          "SPARKLESS_MAX_REQUEST_BYTES": "1048576",
+          "SPARKLESS_MAX_RESULT_BYTES": "8388608",
+          "SPARKLESS_MAX_RESULT_ROWS": "10000",
+          "SPARKLESS_MAX_SESSIONS": "64",
+          "SPARKLESS_MAX_SQL_BYTES": "262144",
+          "SPARKLESS_QUEUE_TIMEOUT_MS": "5000",
+          "SPARKLESS_RESPONSE_TIMEOUT_MS": "60000",
+          "SPARKLESS_SESSION_IDLE_TTL_MS": "900000"
+        },
+        "server_shutdown": {
+          "acknowledged": true,
+          "control_protocol_version": 2,
+          "exit_code": 0,
+          "graceful": true,
+          "rust_global_allocator": null,
+          "seconds": 0.010730416048318148
+        }
+      },
+      "candidate": {
+        "measurements": [
+          {
+            "p50_ms": 0.3407502081245184,
+            "p95_ms": 0.47741690650582314,
+            "p99_ms": 0.861999811604619,
+            "response_bytes": 162,
+            "sample_count": 20,
+            "samples_ms": [
+              0.861999811604619,
+              0.3820830024778843,
+              0.3993748687207699,
+              0.3926670178771019,
+              0.3421250730752945,
+              0.3407502081245184,
+              0.3473751712590456,
+              0.3251249436289072,
+              0.3403332084417343,
+              0.3411660436540842,
+              0.3106251824647188,
+              0.365458894520998,
+              0.47741690650582314,
+              0.29266695491969585,
+              0.3113748971372843,
+              0.3139169421046972,
+              0.3553330898284912,
+              0.3258748911321163,
+              0.32683415338397026,
+              0.31883292831480503
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "result",
+                  "nullable": false,
+                  "type": "integer"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.01,
+            "server_peak_rss_bytes_observed": 25493504,
+            "server_samples": 1,
+            "sql": "SELECT 1 AS result",
+            "workload": "small_read"
+          },
+          {
+            "p50_ms": 0.9085421916097403,
+            "p95_ms": 1.0969170834869146,
+            "p99_ms": 1.3355000410228968,
+            "response_bytes": 2356,
+            "sample_count": 20,
+            "samples_ms": [
+              1.3355000410228968,
+              0.9229159913957119,
+              1.0318330023437738,
+              1.0969170834869146,
+              0.9067920036613941,
+              0.9085421916097403,
+              0.905041117221117,
+              0.9730840101838112,
+              0.9791250340640545,
+              0.8972079958766699,
+              0.8260831236839294,
+              0.8332091383635998,
+              0.8715419098734856,
+              0.9351249318569899,
+              0.9048748761415482,
+              0.9969167876988649,
+              0.9132081177085638,
+              1.0015829466283321,
+              0.8807498961687088,
+              0.8265830110758543
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "value_0",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_0",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_2",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_3",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_4",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_5",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_6",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_7",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_8",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_9",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_10",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_11",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_12",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_13",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_14",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_15",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_16",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_17",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_18",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_19",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_20",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_21",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_22",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_23",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_24",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_25",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_26",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_27",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_28",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_29",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_30",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_31",
+                  "nullable": false,
+                  "type": "string"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.05,
+            "server_peak_rss_bytes_observed": 36880384,
+            "server_samples": 1,
+            "sql": "SELECT CAST(1 AS BIGINT) AS value_0, CAST(NULL AS STRING) AS value_0, TRUE AS value_2, '界' AS value_3, CAST(1 AS BIGINT) AS value_4, CAST(NULL AS STRING) AS value_5, TRUE AS value_6, '界' AS value_7, CAST(1 AS BIGINT) AS value_8, CAST(NULL AS STRING) AS value_9, TRUE AS value_10, '界' AS value_11, CAST(1 AS BIGINT) AS value_12, CAST(NULL AS STRING) AS value_13, TRUE AS value_14, '界' AS value_15, CAST(1 AS BIGINT) AS value_16, CAST(NULL AS STRING) AS value_17, TRUE AS value_18, '界' AS value_19, CAST(1 AS BIGINT) AS value_20, CAST(NULL AS STRING) AS value_21, TRUE AS value_22, '界' AS value_23, CAST(1 AS BIGINT) AS value_24, CAST(NULL AS STRING) AS value_25, TRUE AS value_26, '界' AS value_27, CAST(1 AS BIGINT) AS value_28, CAST(NULL AS STRING) AS value_29, TRUE AS value_30, '界' AS value_31",
+            "workload": "wide_mixed_read"
+          },
+          {
+            "p50_ms": 7.343583973124623,
+            "p95_ms": 9.203500114381313,
+            "p99_ms": 9.526707930490375,
+            "response_bytes": 8000525,
+            "sample_count": 20,
+            "samples_ms": [
+              9.526707930490375,
+              7.459542015567422,
+              7.481375010684133,
+              7.252458017319441,
+              7.189207943156362,
+              7.472208002582192,
+              7.043624995276332,
+              7.431750185787678,
+              7.412708830088377,
+              8.839250076562166,
+              7.307459134608507,
+              7.3663340881466866,
+              7.243667030707002,
+              7.332500070333481,
+              7.349250139668584,
+              7.217708043754101,
+              7.343583973124623,
+              6.964958971366286,
+              7.224832894280553,
+              9.203500114381313
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "id",
+                  "nullable": true,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "payload",
+                  "nullable": true,
+                  "type": "string"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.17999999999999997,
+            "server_peak_rss_bytes_observed": 271745024,
+            "server_samples": 3,
+            "sql": "SELECT id, payload FROM phase420_payload WHERE id < 40 ORDER BY id",
+            "workload": "near_result_limit"
+          }
+        ],
+        "over_limit_error": {
+          "ename": "QueryError",
+          "evalue": "user error: serialized result exceeds the configured byte limit"
+        },
+        "progress_during_near_limit": {
+          "health_latency_p50_ms": 0.40145800448954105,
+          "health_latency_p95_ms": 0.7020840421319008,
+          "health_requests": 3,
+          "http_statement_latency_p50_ms": 0.6975831929594278,
+          "http_statement_latency_p95_ms": 1.901624957099557,
+          "http_statements": 2,
+          "probe_errors": []
+        },
+        "server_command": [
+          "/Volumes/T7/coding/robin-sparkless/target/release/sparkless-server",
+          "control",
+          "--host",
+          "127.0.0.1",
+          "--port",
+          "0",
+          "--connect-host",
+          "127.0.0.1",
+          "--connect-port",
+          "0"
+        ],
+        "server_configuration": {
+          "SPARKLESS_ARROW_TRACE": "1",
+          "SPARKLESS_BODY_READ_TIMEOUT_MS": "10000",
+          "SPARKLESS_CONNECT_TRACE": "1",
+          "SPARKLESS_MAX_ACTIVE_OPERATIONS": "2",
+          "SPARKLESS_MAX_CELL_BYTES": "1048576",
+          "SPARKLESS_MAX_MUTATION_BYTES": "4194304",
+          "SPARKLESS_MAX_MUTATION_RECORDS": "1024",
+          "SPARKLESS_MAX_PENDING_OPERATIONS": "16",
+          "SPARKLESS_MAX_RANGE_ROWS": "10000000",
+          "SPARKLESS_MAX_REQUEST_BYTES": "1048576",
+          "SPARKLESS_MAX_RESULT_BYTES": "8388608",
+          "SPARKLESS_MAX_RESULT_ROWS": "10000",
+          "SPARKLESS_MAX_SESSIONS": "64",
+          "SPARKLESS_MAX_SQL_BYTES": "262144",
+          "SPARKLESS_QUEUE_TIMEOUT_MS": "5000",
+          "SPARKLESS_RESPONSE_TIMEOUT_MS": "60000",
+          "SPARKLESS_SESSION_IDLE_TTL_MS": "900000"
+        },
+        "server_shutdown": {
+          "acknowledged": true,
+          "control_protocol_version": 2,
+          "exit_code": 0,
+          "graceful": true,
+          "rust_global_allocator": null,
+          "seconds": 0.004649916896596551
+        }
+      },
+      "order": [
+        "candidate",
+        "baseline"
+      ],
+      "pair": 2
+    },
+    {
+      "baseline": {
+        "measurements": [
+          {
+            "p50_ms": 0.3477910067886114,
+            "p95_ms": 0.4669157788157463,
+            "p99_ms": 1.4848329592496157,
+            "response_bytes": 162,
+            "sample_count": 20,
+            "samples_ms": [
+              1.4848329592496157,
+              0.4669157788157463,
+              0.3712500911206007,
+              0.41112489998340607,
+              0.3477910067886114,
+              0.3244169056415558,
+              0.34074997529387474,
+              0.37291692569851875,
+              0.4049160052090883,
+              0.39795786142349243,
+              0.37241680547595024,
+              0.3154170699417591,
+              0.3154999576508999,
+              0.3199998755007982,
+              0.3350840415805578,
+              0.31162495724856853,
+              0.3905829507857561,
+              0.3300420939922333,
+              0.3494999837130308,
+              0.29641715809702873
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "result",
+                  "nullable": false,
+                  "type": "integer"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.01,
+            "server_peak_rss_bytes_observed": 25493504,
+            "server_samples": 1,
+            "sql": "SELECT 1 AS result",
+            "workload": "small_read"
+          },
+          {
+            "p50_ms": 0.8930421900004148,
+            "p95_ms": 1.0294578969478607,
+            "p99_ms": 1.9660410471260548,
+            "response_bytes": 2356,
+            "sample_count": 20,
+            "samples_ms": [
+              1.9660410471260548,
+              0.953625189140439,
+              0.893541844561696,
+              1.0294578969478607,
+              0.8794579189270735,
+              0.9733338374644518,
+              0.8930421900004148,
+              0.9174582082778215,
+              0.8675421122461557,
+              0.8402920793741941,
+              0.8688750676810741,
+              0.8855829946696758,
+              0.922083156183362,
+              0.9735829662531614,
+              0.8872088510543108,
+              0.937500037252903,
+              0.8854579646140337,
+              0.9503341279923916,
+              0.8747500833123922,
+              0.8460830431431532
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "value_0",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_0",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_2",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_3",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_4",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_5",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_6",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_7",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_8",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_9",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_10",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_11",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_12",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_13",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_14",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_15",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_16",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_17",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_18",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_19",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_20",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_21",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_22",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_23",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_24",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_25",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_26",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_27",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_28",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_29",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_30",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_31",
+                  "nullable": false,
+                  "type": "string"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.04000000000000001,
+            "server_peak_rss_bytes_observed": 36749312,
+            "server_samples": 1,
+            "sql": "SELECT CAST(1 AS BIGINT) AS value_0, CAST(NULL AS STRING) AS value_0, TRUE AS value_2, '界' AS value_3, CAST(1 AS BIGINT) AS value_4, CAST(NULL AS STRING) AS value_5, TRUE AS value_6, '界' AS value_7, CAST(1 AS BIGINT) AS value_8, CAST(NULL AS STRING) AS value_9, TRUE AS value_10, '界' AS value_11, CAST(1 AS BIGINT) AS value_12, CAST(NULL AS STRING) AS value_13, TRUE AS value_14, '界' AS value_15, CAST(1 AS BIGINT) AS value_16, CAST(NULL AS STRING) AS value_17, TRUE AS value_18, '界' AS value_19, CAST(1 AS BIGINT) AS value_20, CAST(NULL AS STRING) AS value_21, TRUE AS value_22, '界' AS value_23, CAST(1 AS BIGINT) AS value_24, CAST(NULL AS STRING) AS value_25, TRUE AS value_26, '界' AS value_27, CAST(1 AS BIGINT) AS value_28, CAST(NULL AS STRING) AS value_29, TRUE AS value_30, '界' AS value_31",
+            "workload": "wide_mixed_read"
+          },
+          {
+            "p50_ms": 9.732707869261503,
+            "p95_ms": 11.302125174552202,
+            "p99_ms": 11.419499991461635,
+            "response_bytes": 8000525,
+            "sample_count": 20,
+            "samples_ms": [
+              10.37249993532896,
+              9.712792001664639,
+              9.669874794781208,
+              9.658541996032,
+              9.747917065396905,
+              9.775709128007293,
+              9.800707921385765,
+              9.74224996753037,
+              11.302125174552202,
+              9.673667140305042,
+              9.620334021747112,
+              9.555541211739182,
+              9.503334062173963,
+              9.72883403301239,
+              9.74233285523951,
+              9.450916899368167,
+              11.419499991461635,
+              9.931667009368539,
+              9.921042015776038,
+              9.732707869261503
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "id",
+                  "nullable": true,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "payload",
+                  "nullable": true,
+                  "type": "string"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.22000000000000003,
+            "server_peak_rss_bytes_observed": 421216256,
+            "server_samples": 3,
+            "sql": "SELECT id, payload FROM phase420_payload WHERE id < 40 ORDER BY id",
+            "workload": "near_result_limit"
+          }
+        ],
+        "over_limit_error": {
+          "ename": "QueryError",
+          "evalue": "user error: serialized result exceeds the configured byte limit"
+        },
+        "progress_during_near_limit": {
+          "health_latency_p50_ms": 0.26670796796679497,
+          "health_latency_p95_ms": 0.44220895506441593,
+          "health_requests": 3,
+          "http_statement_latency_p50_ms": 0.51716691814363,
+          "http_statement_latency_p95_ms": 0.6659170612692833,
+          "http_statements": 2,
+          "probe_errors": []
+        },
+        "server_command": [
+          "/private/tmp/sparkless-phase420-attribution/sparkless-server-no-1740",
+          "control",
+          "--host",
+          "127.0.0.1",
+          "--port",
+          "0",
+          "--connect-host",
+          "127.0.0.1",
+          "--connect-port",
+          "0"
+        ],
+        "server_configuration": {
+          "SPARKLESS_ARROW_TRACE": "1",
+          "SPARKLESS_BODY_READ_TIMEOUT_MS": "10000",
+          "SPARKLESS_CONNECT_TRACE": "1",
+          "SPARKLESS_MAX_ACTIVE_OPERATIONS": "2",
+          "SPARKLESS_MAX_CELL_BYTES": "1048576",
+          "SPARKLESS_MAX_MUTATION_BYTES": "4194304",
+          "SPARKLESS_MAX_MUTATION_RECORDS": "1024",
+          "SPARKLESS_MAX_PENDING_OPERATIONS": "16",
+          "SPARKLESS_MAX_RANGE_ROWS": "10000000",
+          "SPARKLESS_MAX_REQUEST_BYTES": "1048576",
+          "SPARKLESS_MAX_RESULT_BYTES": "8388608",
+          "SPARKLESS_MAX_RESULT_ROWS": "10000",
+          "SPARKLESS_MAX_SESSIONS": "64",
+          "SPARKLESS_MAX_SQL_BYTES": "262144",
+          "SPARKLESS_QUEUE_TIMEOUT_MS": "5000",
+          "SPARKLESS_RESPONSE_TIMEOUT_MS": "60000",
+          "SPARKLESS_SESSION_IDLE_TTL_MS": "900000"
+        },
+        "server_shutdown": {
+          "acknowledged": true,
+          "control_protocol_version": 2,
+          "exit_code": 0,
+          "graceful": true,
+          "rust_global_allocator": null,
+          "seconds": 0.010362874949350953
+        }
+      },
+      "candidate": {
+        "measurements": [
+          {
+            "p50_ms": 0.3387918695807457,
+            "p95_ms": 0.46425010077655315,
+            "p99_ms": 0.8657090365886688,
+            "response_bytes": 162,
+            "sample_count": 20,
+            "samples_ms": [
+              0.8657090365886688,
+              0.4389581736177206,
+              0.38766697980463505,
+              0.4148329608142376,
+              0.33674994483590126,
+              0.34350017085671425,
+              0.33525004982948303,
+              0.3326660953462124,
+              0.34912489354610443,
+              0.3597498871386051,
+              0.33587496727705,
+              0.2993750385940075,
+              0.46425010077655315,
+              0.3697499632835388,
+              0.3036248963326216,
+              0.31329202465713024,
+              0.3061247989535332,
+              0.3136249724775553,
+              0.33908290788531303,
+              0.3387918695807457
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "result",
+                  "nullable": false,
+                  "type": "integer"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.01,
+            "server_peak_rss_bytes_observed": 25559040,
+            "server_samples": 1,
+            "sql": "SELECT 1 AS result",
+            "workload": "small_read"
+          },
+          {
+            "p50_ms": 0.8789589628577232,
+            "p95_ms": 0.9727920405566692,
+            "p99_ms": 1.391249941661954,
+            "response_bytes": 2356,
+            "sample_count": 20,
+            "samples_ms": [
+              1.391249941661954,
+              0.9727920405566692,
+              0.9183748625218868,
+              0.9683340322226286,
+              0.8423328399658203,
+              0.8786250837147236,
+              0.8415838237851858,
+              0.8782499935477972,
+              0.8415419142693281,
+              0.9621670469641685,
+              0.8993330411612988,
+              0.9025419130921364,
+              0.9032920934259892,
+              0.8789589628577232,
+              0.798666849732399,
+              0.8440830279141665,
+              0.8549999911338091,
+              0.9160828776657581,
+              0.8496248628944159,
+              0.9460831061005592
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "value_0",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_0",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_2",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_3",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_4",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_5",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_6",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_7",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_8",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_9",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_10",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_11",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_12",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_13",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_14",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_15",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_16",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_17",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_18",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_19",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_20",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_21",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_22",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_23",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_24",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_25",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_26",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_27",
+                  "nullable": false,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_28",
+                  "nullable": false,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_29",
+                  "nullable": true,
+                  "type": "string"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_30",
+                  "nullable": false,
+                  "type": "boolean"
+                },
+                {
+                  "metadata": {},
+                  "name": "value_31",
+                  "nullable": false,
+                  "type": "string"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.05,
+            "server_peak_rss_bytes_observed": 36831232,
+            "server_samples": 1,
+            "sql": "SELECT CAST(1 AS BIGINT) AS value_0, CAST(NULL AS STRING) AS value_0, TRUE AS value_2, '界' AS value_3, CAST(1 AS BIGINT) AS value_4, CAST(NULL AS STRING) AS value_5, TRUE AS value_6, '界' AS value_7, CAST(1 AS BIGINT) AS value_8, CAST(NULL AS STRING) AS value_9, TRUE AS value_10, '界' AS value_11, CAST(1 AS BIGINT) AS value_12, CAST(NULL AS STRING) AS value_13, TRUE AS value_14, '界' AS value_15, CAST(1 AS BIGINT) AS value_16, CAST(NULL AS STRING) AS value_17, TRUE AS value_18, '界' AS value_19, CAST(1 AS BIGINT) AS value_20, CAST(NULL AS STRING) AS value_21, TRUE AS value_22, '界' AS value_23, CAST(1 AS BIGINT) AS value_24, CAST(NULL AS STRING) AS value_25, TRUE AS value_26, '界' AS value_27, CAST(1 AS BIGINT) AS value_28, CAST(NULL AS STRING) AS value_29, TRUE AS value_30, '界' AS value_31",
+            "workload": "wide_mixed_read"
+          },
+          {
+            "p50_ms": 7.257499964907765,
+            "p95_ms": 8.832000195980072,
+            "p99_ms": 8.988708956167102,
+            "response_bytes": 8000525,
+            "sample_count": 20,
+            "samples_ms": [
+              7.872791960835457,
+              7.1451670955866575,
+              7.36620812676847,
+              7.257499964907765,
+              7.222249871119857,
+              7.2316250298172235,
+              7.353166118264198,
+              7.327541941776872,
+              7.299624849110842,
+              8.988708956167102,
+              7.230709074065089,
+              7.118874927982688,
+              7.196791935712099,
+              7.4295829981565475,
+              6.9687089417129755,
+              7.185666123405099,
+              7.294791983440518,
+              7.454583887010813,
+              7.179874926805496,
+              8.832000195980072
+            ],
+            "schema": {
+              "fields": [
+                {
+                  "metadata": {},
+                  "name": "id",
+                  "nullable": true,
+                  "type": "long"
+                },
+                {
+                  "metadata": {},
+                  "name": "payload",
+                  "nullable": true,
+                  "type": "string"
+                }
+              ],
+              "type": "struct"
+            },
+            "server_cpu_seconds": 0.17,
+            "server_peak_rss_bytes_observed": 252821504,
+            "server_samples": 3,
+            "sql": "SELECT id, payload FROM phase420_payload WHERE id < 40 ORDER BY id",
+            "workload": "near_result_limit"
+          }
+        ],
+        "over_limit_error": {
+          "ename": "QueryError",
+          "evalue": "user error: serialized result exceeds the configured byte limit"
+        },
+        "progress_during_near_limit": {
+          "health_latency_p50_ms": 0.34624990075826645,
+          "health_latency_p95_ms": 5.07829082198441,
+          "health_requests": 3,
+          "http_statement_latency_p50_ms": 0.5868750158697367,
+          "http_statement_latency_p95_ms": 2.1222499199211597,
+          "http_statements": 2,
+          "probe_errors": []
+        },
+        "server_command": [
+          "/Volumes/T7/coding/robin-sparkless/target/release/sparkless-server",
+          "control",
+          "--host",
+          "127.0.0.1",
+          "--port",
+          "0",
+          "--connect-host",
+          "127.0.0.1",
+          "--connect-port",
+          "0"
+        ],
+        "server_configuration": {
+          "SPARKLESS_ARROW_TRACE": "1",
+          "SPARKLESS_BODY_READ_TIMEOUT_MS": "10000",
+          "SPARKLESS_CONNECT_TRACE": "1",
+          "SPARKLESS_MAX_ACTIVE_OPERATIONS": "2",
+          "SPARKLESS_MAX_CELL_BYTES": "1048576",
+          "SPARKLESS_MAX_MUTATION_BYTES": "4194304",
+          "SPARKLESS_MAX_MUTATION_RECORDS": "1024",
+          "SPARKLESS_MAX_PENDING_OPERATIONS": "16",
+          "SPARKLESS_MAX_RANGE_ROWS": "10000000",
+          "SPARKLESS_MAX_REQUEST_BYTES": "1048576",
+          "SPARKLESS_MAX_RESULT_BYTES": "8388608",
+          "SPARKLESS_MAX_RESULT_ROWS": "10000",
+          "SPARKLESS_MAX_SESSIONS": "64",
+          "SPARKLESS_MAX_SQL_BYTES": "262144",
+          "SPARKLESS_QUEUE_TIMEOUT_MS": "5000",
+          "SPARKLESS_RESPONSE_TIMEOUT_MS": "60000",
+          "SPARKLESS_SESSION_IDLE_TTL_MS": "900000"
+        },
+        "server_shutdown": {
+          "acknowledged": true,
+          "control_protocol_version": 2,
+          "exit_code": 0,
+          "graceful": true,
+          "rust_global_allocator": null,
+          "seconds": 0.004659040831029415
+        }
+      },
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "pair": 3
+    }
+  ],
+  "platform": "macOS-26.5.2-arm64-arm-64bit",
+  "python": "3.11.15",
+  "regression_budget": {
+    "p50": {
+      "absolute_ms": 1,
+      "relative": 0.05
+    },
+    "p95": {
+      "absolute_ms": 2,
+      "relative": 0.1
+    }
+  },
+  "schema_version": 1,
+  "source_dirty_sha256": "ae24347a50bef34d6e8119a9bc95ea8199e32c2f62dae17eb3a549ff9a1a4d3d",
+  "source_revision": "0b5c59fe198b3e06595f10e8c95e843eb956c703",
+  "timestamp_utc": "2026-11-06T09:18:45.591457+00:00",
+  "warmups_per_workload": 1,
+  "workload_assessment": [
+    {
+      "median_p50_change_ms": -0.008999137207865715,
+      "median_p95_change_ms": -0.03408314660191536,
+      "p50_breached_pairs": 0,
+      "p95_breached_pairs": 0,
+      "pairs": [
+        {
+          "p50_change_ms": -0.08287513628602028,
+          "p50_limit_ms": 1,
+          "p50_over_budget": false,
+          "p95_change_ms": -0.03408314660191536,
+          "p95_limit_ms": 2,
+          "p95_over_budget": false,
+          "pair": 1
+        },
+        {
+          "p50_change_ms": 0.0024172477424144745,
+          "p50_limit_ms": 1,
+          "p50_over_budget": false,
+          "p95_change_ms": -0.06245821714401245,
+          "p95_limit_ms": 2,
+          "p95_over_budget": false,
+          "pair": 2
+        },
+        {
+          "p50_change_ms": -0.008999137207865715,
+          "p50_limit_ms": 1,
+          "p50_over_budget": false,
+          "p95_change_ms": -0.0026656780391931534,
+          "p95_limit_ms": 2,
+          "p95_over_budget": false,
+          "pair": 3
+        }
+      ],
+      "workload": "small_read"
+    },
+    {
+      "median_p50_change_ms": 0.013334210962057114,
+      "median_p95_change_ms": 0.01979200169444084,
+      "p50_breached_pairs": 0,
+      "p95_breached_pairs": 0,
+      "pairs": [
+        {
+          "p50_change_ms": 0.01812400296330452,
+          "p50_limit_ms": 1,
+          "p50_over_budget": false,
+          "p95_change_ms": 0.01979200169444084,
+          "p95_limit_ms": 2,
+          "p95_over_budget": false,
+          "pair": 1
+        },
+        {
+          "p50_change_ms": 0.013334210962057114,
+          "p50_limit_ms": 1,
+          "p50_over_budget": false,
+          "p95_change_ms": 0.12479210272431374,
+          "p95_limit_ms": 2,
+          "p95_over_budget": false,
+          "pair": 2
+        },
+        {
+          "p50_change_ms": -0.014083227142691612,
+          "p50_limit_ms": 1,
+          "p50_over_budget": false,
+          "p95_change_ms": -0.05666585639119148,
+          "p95_limit_ms": 2,
+          "p95_over_budget": false,
+          "pair": 3
+        }
+      ],
+      "workload": "wide_mixed_read"
+    },
+    {
+      "median_p50_change_ms": -2.373207127675414,
+      "median_p95_change_ms": -2.165790880098939,
+      "p50_breached_pairs": 0,
+      "p95_breached_pairs": 0,
+      "pairs": [
+        {
+          "p50_change_ms": -2.25174892693758,
+          "p50_limit_ms": 1,
+          "p50_over_budget": false,
+          "p95_change_ms": -2.165790880098939,
+          "p95_limit_ms": 2,
+          "p95_over_budget": false,
+          "pair": 1
+        },
+        {
+          "p50_change_ms": -2.373207127675414,
+          "p50_limit_ms": 1,
+          "p50_over_budget": false,
+          "p95_change_ms": -1.7508328892290592,
+          "p95_limit_ms": 2,
+          "p95_over_budget": false,
+          "pair": 2
+        },
+        {
+          "p50_change_ms": -2.475207904353738,
+          "p50_limit_ms": 1,
+          "p50_over_budget": false,
+          "p95_change_ms": -2.47012497857213,
+          "p95_limit_ms": 2,
+          "p95_over_budget": false,
+          "pair": 3
+        }
+      ],
+      "workload": "near_result_limit"
+    }
+  ]
+}

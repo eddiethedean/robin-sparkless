@@ -1,0 +1,2898 @@
+{
+  "arrow": "26.0.0",
+  "benchmark_runner_sha256_current": "d06b588aa498bb6284e5428be7db252fae926ac85625482be833e3bc2ea7148b",
+  "duckdb": "1.5.1",
+  "format_version": 1,
+  "gate": "V38 full local load matrix: diagnostic evidence only; admission timeouts and non-reattachable response stalls remain",
+  "limitations": [
+    "Reattachable and non-reattachable 60-second 1/4/8/16-client cohorts were measured at active-operation limits 2, 4, and 8 against both local and shared Quack owners.",
+    "For reattachable runs, both owner modes recorded 25, 19, and 10 admission rejections at active limits 2, 4, and 8. Only active-limit-8 cohorts with 1/4 clients had zero rejections; this is a single-host candidate observation, not a release support guarantee.",
+    "For non-reattachable runs, both owner modes recorded 27, 21, and 13 combined admission/stall rejections at active limits 2, 4, and 8. Slow-reader response stalls occurred in every measured active-limit cohort, including the final reader; no non-reattachable supported-load envelope is established.",
+    "Across all load runs accepted results were correct, health probes had no errors, and server/owner processes shut down gracefully. Load rejection and stream-stall failures remain unresolved.",
+    "The shared-owner lifecycle smoke tests owner restart and recovery, but owner loss during an actively streamed result remains open.",
+    "Storage-level COMMIT failure injection and complete release/cleanup acceptance remain open.",
+    "Cross-platform execution and exact release-artifact/package checks remain release gates."
+  ],
+  "measured_runs": {
+    "local_active2_nonreattachable": {
+      "active_operations": 2,
+      "capacity_rejection_count": 27,
+      "cohorts": [
+        {
+          "capacity_rejection_count": 1,
+          "capacity_rejections": [
+            {
+              "diagnostic": "Connect response stream stalled without progress",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 1,
+          "correct_operations": 508,
+          "health_probe_errors": [],
+          "health_requests": 560,
+          "latency_p50_ms": 92.53020794130862,
+          "latency_p95_ms": 165.21591693162918,
+          "owner_peak_rss_bytes": null,
+          "server_peak_rss_bytes": 137674752,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 8.440254975421178
+        },
+        {
+          "capacity_rejection_count": 3,
+          "capacity_rejections": [
+            {
+              "client_index": 1,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 2,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 4,
+          "correct_operations": 896,
+          "health_probe_errors": [],
+          "health_requests": 565,
+          "latency_p50_ms": 125.40008313953876,
+          "latency_p95_ms": 198.62083299085498,
+          "owner_peak_rss_bytes": null,
+          "server_peak_rss_bytes": 138657792,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 14.850305625305468
+        },
+        {
+          "capacity_rejection_count": 7,
+          "capacity_rejections": [
+            {
+              "client_index": 0,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 1,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 2,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 3,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 5,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 6,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 8,
+          "correct_operations": 888,
+          "health_probe_errors": [],
+          "health_requests": 564,
+          "latency_p50_ms": 126.70720811001956,
+          "latency_p95_ms": 195.5935419537127,
+          "owner_peak_rss_bytes": null,
+          "server_peak_rss_bytes": 141099008,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 14.747709242060067
+        },
+        {
+          "capacity_rejection_count": 15,
+          "capacity_rejections": [
+            {
+              "client_index": 0,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 1,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 2,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 3,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 4,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 5,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 8,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 9,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 10,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 11,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 12,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 13,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 14,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 15,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 16,
+          "correct_operations": 896,
+          "health_probe_errors": [],
+          "health_requests": 564,
+          "latency_p50_ms": 126.22854206711054,
+          "latency_p95_ms": 196.7888749204576,
+          "owner_peak_rss_bytes": null,
+          "server_peak_rss_bytes": 145342464,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 14.844046086860434
+        }
+      ],
+      "final_slow_reader": {
+        "capacity_rejection": {
+          "diagnostic": "Connect response stream stalled without progress",
+          "source": "final_slow_reader",
+          "status": "DEADLINE_EXCEEDED"
+        },
+        "elapsed_seconds": null,
+        "health_probe_errors": [],
+        "health_requests": 372,
+        "owner_peak_rss_bytes": null,
+        "rows": null,
+        "server_peak_rss_bytes": 145309696
+      },
+      "owner_mode": "local",
+      "owner_shutdown_graceful": null,
+      "queue_timeout_ms": 5000,
+      "reader_reattachable": false,
+      "report": "phase-420-duckdb-v38-load-local-active2-nonreattachable.json.gz",
+      "result": "capacity_rejections_observed",
+      "server_shutdown_graceful": true,
+      "sha256": "308453115768ec4cfeb204b364c0cb75b0c813532d2e69876e359c7f3c8dd927",
+      "source_dirty_sha256": "a6f9fa23bf6cd319ab7c3cc2e9306a4c00865f9d91a7eac48aca2ff5a78e15d0"
+    },
+    "local_active2_reattachable": {
+      "active_operations": 2,
+      "capacity_rejection_count": 25,
+      "cohorts": [
+        {
+          "capacity_rejection_count": 0,
+          "capacity_rejections": [],
+          "clients": 1,
+          "correct_operations": 80,
+          "health_probe_errors": [],
+          "health_requests": 560,
+          "latency_p50_ms": 95.79962491989136,
+          "latency_p95_ms": 166.84004198759794,
+          "owner_peak_rss_bytes": null,
+          "server_peak_rss_bytes": 137756672,
+          "slow_reader_elapsed_seconds": 53.20404645893723,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": 1000000,
+          "throughput_operations_per_second": 1.3285695056610036
+        },
+        {
+          "capacity_rejection_count": 3,
+          "capacity_rejections": [
+            {
+              "client_index": 2,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 3,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 4,
+          "correct_operations": 900,
+          "health_probe_errors": [],
+          "health_requests": 564,
+          "latency_p50_ms": 125.96191605553031,
+          "latency_p95_ms": 196.95116695947945,
+          "owner_peak_rss_bytes": null,
+          "server_peak_rss_bytes": 139493376,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 14.907555875203807
+        },
+        {
+          "capacity_rejection_count": 7,
+          "capacity_rejections": [
+            {
+              "client_index": 1,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 2,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 4,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 5,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 6,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 7,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 8,
+          "correct_operations": 888,
+          "health_probe_errors": [],
+          "health_requests": 564,
+          "latency_p50_ms": 125.9067920036614,
+          "latency_p95_ms": 196.14987494423985,
+          "owner_peak_rss_bytes": null,
+          "server_peak_rss_bytes": 126042112,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 14.739874485828585
+        },
+        {
+          "capacity_rejection_count": 15,
+          "capacity_rejections": [
+            {
+              "client_index": 0,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 1,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 2,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 3,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 4,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 5,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 7,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 8,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 9,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 10,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 11,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 12,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 13,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 15,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 16,
+          "correct_operations": 876,
+          "health_probe_errors": [],
+          "health_requests": 564,
+          "latency_p50_ms": 128.89749999158084,
+          "latency_p95_ms": 198.61816707998514,
+          "owner_peak_rss_bytes": null,
+          "server_peak_rss_bytes": 129941504,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 14.527531085683744
+        }
+      ],
+      "final_slow_reader": {
+        "capacity_rejection": null,
+        "elapsed_seconds": 53.04913154197857,
+        "health_probe_errors": [],
+        "health_requests": 497,
+        "owner_peak_rss_bytes": null,
+        "rows": 1000000,
+        "server_peak_rss_bytes": 129892352
+      },
+      "owner_mode": "local",
+      "owner_shutdown_graceful": null,
+      "queue_timeout_ms": 5000,
+      "reader_reattachable": true,
+      "report": "phase-420-duckdb-v38-load-local-active2-reattachable.json.gz",
+      "result": "capacity_rejections_observed",
+      "server_shutdown_graceful": true,
+      "sha256": "571ad98d6036dfaf2aa397dc279df8b74c8d5473224104a0186cccfd504d07eb",
+      "source_dirty_sha256": "eca8829417dee41af2ee7d5e020f8c309cbca9044a93d4ae82dc7f2f5361fae9"
+    },
+    "local_active4_nonreattachable": {
+      "active_operations": 4,
+      "capacity_rejection_count": 21,
+      "cohorts": [
+        {
+          "capacity_rejection_count": 1,
+          "capacity_rejections": [
+            {
+              "diagnostic": "Connect response stream stalled without progress",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 1,
+          "correct_operations": 508,
+          "health_probe_errors": [],
+          "health_requests": 562,
+          "latency_p50_ms": 90.67654190585017,
+          "latency_p95_ms": 168.12862502411008,
+          "owner_peak_rss_bytes": null,
+          "server_peak_rss_bytes": 137641984,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 8.418871528518563
+        },
+        {
+          "capacity_rejection_count": 1,
+          "capacity_rejections": [
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 4,
+          "correct_operations": 916,
+          "health_probe_errors": [],
+          "health_requests": 564,
+          "latency_p50_ms": 251.8092079553753,
+          "latency_p95_ms": 358.3748750388622,
+          "owner_peak_rss_bytes": null,
+          "server_peak_rss_bytes": 120881152,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 15.141735717358836
+        },
+        {
+          "capacity_rejection_count": 5,
+          "capacity_rejections": [
+            {
+              "client_index": 0,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 1,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 2,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 5,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 8,
+          "correct_operations": 912,
+          "health_probe_errors": [],
+          "health_requests": 568,
+          "latency_p50_ms": 250.491582788527,
+          "latency_p95_ms": 347.95270883478224,
+          "owner_peak_rss_bytes": null,
+          "server_peak_rss_bytes": 123125760,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 15.056879405062048
+        },
+        {
+          "capacity_rejection_count": 13,
+          "capacity_rejections": [
+            {
+              "client_index": 0,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 1,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 2,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 5,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 6,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 7,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 8,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 9,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 10,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 12,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 13,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 14,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 16,
+          "correct_operations": 904,
+          "health_probe_errors": [],
+          "health_requests": 568,
+          "latency_p50_ms": 249.78445912711322,
+          "latency_p95_ms": 352.20441594719887,
+          "owner_peak_rss_bytes": null,
+          "server_peak_rss_bytes": 127533056,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 14.92809134068927
+        }
+      ],
+      "final_slow_reader": {
+        "capacity_rejection": {
+          "diagnostic": "Connect response stream stalled without progress",
+          "source": "final_slow_reader",
+          "status": "DEADLINE_EXCEEDED"
+        },
+        "elapsed_seconds": null,
+        "health_probe_errors": [],
+        "health_requests": 374,
+        "owner_peak_rss_bytes": null,
+        "rows": null,
+        "server_peak_rss_bytes": 127582208
+      },
+      "owner_mode": "local",
+      "owner_shutdown_graceful": null,
+      "queue_timeout_ms": 5000,
+      "reader_reattachable": false,
+      "report": "phase-420-duckdb-v38-load-local-active4-nonreattachable.json.gz",
+      "result": "capacity_rejections_observed",
+      "server_shutdown_graceful": true,
+      "sha256": "1188dc1dac106e3c8b512289e921554d9693f7c05eff8eddedb22dbd2c11c1a7",
+      "source_dirty_sha256": "a6f9fa23bf6cd319ab7c3cc2e9306a4c00865f9d91a7eac48aca2ff5a78e15d0"
+    },
+    "local_active4_reattachable": {
+      "active_operations": 4,
+      "capacity_rejection_count": 19,
+      "cohorts": [
+        {
+          "capacity_rejection_count": 0,
+          "capacity_rejections": [],
+          "clients": 1,
+          "correct_operations": 96,
+          "health_probe_errors": [],
+          "health_requests": 570,
+          "latency_p50_ms": 84.6241251565516,
+          "latency_p95_ms": 170.12974992394447,
+          "owner_peak_rss_bytes": null,
+          "server_peak_rss_bytes": 137084928,
+          "slow_reader_elapsed_seconds": 52.09724962501787,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": 1000000,
+          "throughput_operations_per_second": 1.5981877915569456
+        },
+        {
+          "capacity_rejection_count": 1,
+          "capacity_rejections": [
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 4,
+          "correct_operations": 992,
+          "health_probe_errors": [],
+          "health_requests": 576,
+          "latency_p50_ms": 236.21062515303493,
+          "latency_p95_ms": 319.7058748919517,
+          "owner_peak_rss_bytes": null,
+          "server_peak_rss_bytes": 124583936,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 16.38684767177771
+        },
+        {
+          "capacity_rejection_count": 5,
+          "capacity_rejections": [
+            {
+              "client_index": 2,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 5,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 6,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 7,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 8,
+          "correct_operations": 924,
+          "health_probe_errors": [],
+          "health_requests": 566,
+          "latency_p50_ms": 249.27766690962017,
+          "latency_p95_ms": 346.5592910069972,
+          "owner_peak_rss_bytes": null,
+          "server_peak_rss_bytes": 123060224,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 15.272162560428313
+        },
+        {
+          "capacity_rejection_count": 13,
+          "capacity_rejections": [
+            {
+              "client_index": 1,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 2,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 4,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 5,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 6,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 7,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 8,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 9,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 10,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 11,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 12,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 15,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 16,
+          "correct_operations": 912,
+          "health_probe_errors": [],
+          "health_requests": 566,
+          "latency_p50_ms": 247.53004196099937,
+          "latency_p95_ms": 354.87054218538105,
+          "owner_peak_rss_bytes": null,
+          "server_peak_rss_bytes": 126681088,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 15.046679042592826
+        }
+      ],
+      "final_slow_reader": {
+        "capacity_rejection": null,
+        "elapsed_seconds": 52.975084957899526,
+        "health_probe_errors": [],
+        "health_requests": 495,
+        "owner_peak_rss_bytes": null,
+        "rows": 1000000,
+        "server_peak_rss_bytes": 126697472
+      },
+      "owner_mode": "local",
+      "owner_shutdown_graceful": null,
+      "queue_timeout_ms": 5000,
+      "reader_reattachable": true,
+      "report": "phase-420-duckdb-v38-load-local-active4-reattachable.json.gz",
+      "result": "capacity_rejections_observed",
+      "server_shutdown_graceful": true,
+      "sha256": "55e99ffa2d47c88bbca82f755395f2f5a03e6772f9ee5e9ae94a51e29dcb662b",
+      "source_dirty_sha256": "eca8829417dee41af2ee7d5e020f8c309cbca9044a93d4ae82dc7f2f5361fae9"
+    },
+    "local_active8_nonreattachable": {
+      "active_operations": 8,
+      "capacity_rejection_count": 13,
+      "cohorts": [
+        {
+          "capacity_rejection_count": 1,
+          "capacity_rejections": [
+            {
+              "diagnostic": "Connect response stream stalled without progress",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 1,
+          "correct_operations": 512,
+          "health_probe_errors": [],
+          "health_requests": 562,
+          "latency_p50_ms": 92.8231249563396,
+          "latency_p95_ms": 163.53575000539422,
+          "owner_peak_rss_bytes": null,
+          "server_peak_rss_bytes": 137707520,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 8.489039464855747
+        },
+        {
+          "capacity_rejection_count": 1,
+          "capacity_rejections": [
+            {
+              "diagnostic": "Connect response stream stalled without progress",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 4,
+          "correct_operations": 768,
+          "health_probe_errors": [],
+          "health_requests": 567,
+          "latency_p50_ms": 248.29091597348452,
+          "latency_p95_ms": 356.7092081066221,
+          "owner_peak_rss_bytes": null,
+          "server_peak_rss_bytes": 139427840,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 12.67467601613614
+        },
+        {
+          "capacity_rejection_count": 1,
+          "capacity_rejections": [
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 8,
+          "correct_operations": 940,
+          "health_probe_errors": [],
+          "health_requests": 577,
+          "latency_p50_ms": 460.6491669546813,
+          "latency_p95_ms": 739.5297500770539,
+          "owner_peak_rss_bytes": null,
+          "server_peak_rss_bytes": 141541376,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 15.289847141595244
+        },
+        {
+          "capacity_rejection_count": 9,
+          "capacity_rejections": [
+            {
+              "client_index": 0,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 1,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 2,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 5,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 11,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 12,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 13,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 15,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 16,
+          "correct_operations": 920,
+          "health_probe_errors": [],
+          "health_requests": 571,
+          "latency_p50_ms": 457.2570421732962,
+          "latency_p95_ms": 763.0944580305368,
+          "owner_peak_rss_bytes": null,
+          "server_peak_rss_bytes": 127533056,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 15.075769393264693
+        }
+      ],
+      "final_slow_reader": {
+        "capacity_rejection": {
+          "diagnostic": "Connect response stream stalled without progress",
+          "source": "final_slow_reader",
+          "status": "DEADLINE_EXCEEDED"
+        },
+        "elapsed_seconds": null,
+        "health_probe_errors": [],
+        "health_requests": 374,
+        "owner_peak_rss_bytes": null,
+        "rows": null,
+        "server_peak_rss_bytes": 127500288
+      },
+      "owner_mode": "local",
+      "owner_shutdown_graceful": null,
+      "queue_timeout_ms": 5000,
+      "reader_reattachable": false,
+      "report": "phase-420-duckdb-v38-load-nonreattachable-local.json.gz",
+      "result": "capacity_rejections_observed",
+      "server_shutdown_graceful": true,
+      "sha256": "afde4bc3120cf73b08dc44021da6ed86060cabae7748a1ab4c96a6009e8b5b32",
+      "source_dirty_sha256": "d948ba2dba1ee29fa355abc630e3b65d504da88b80406f81472bdee00e7f800b"
+    },
+    "local_active8_reattachable": {
+      "active_operations": 8,
+      "capacity_rejection_count": 10,
+      "cohorts": [
+        {
+          "capacity_rejection_count": 0,
+          "capacity_rejections": [],
+          "clients": 1,
+          "correct_operations": 80,
+          "health_probe_errors": [],
+          "health_requests": 560,
+          "latency_p50_ms": 94.920750008896,
+          "latency_p95_ms": 163.10137510299683,
+          "owner_peak_rss_bytes": null,
+          "server_peak_rss_bytes": 137543680,
+          "slow_reader_elapsed_seconds": 53.09078366612084,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": 1000000,
+          "throughput_operations_per_second": 1.3319296080831453
+        },
+        {
+          "capacity_rejection_count": 0,
+          "capacity_rejections": [],
+          "clients": 4,
+          "correct_operations": 128,
+          "health_probe_errors": [],
+          "health_requests": 565,
+          "latency_p50_ms": 249.4130830746144,
+          "latency_p95_ms": 361.94837489165366,
+          "owner_peak_rss_bytes": null,
+          "server_peak_rss_bytes": 139116544,
+          "slow_reader_elapsed_seconds": 53.219640667084605,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": 1000000,
+          "throughput_operations_per_second": 2.115919531589213
+        },
+        {
+          "capacity_rejection_count": 1,
+          "capacity_rejections": [
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 8,
+          "correct_operations": 928,
+          "health_probe_errors": [],
+          "health_requests": 570,
+          "latency_p50_ms": 467.720584012568,
+          "latency_p95_ms": 732.1423750836402,
+          "owner_peak_rss_bytes": null,
+          "server_peak_rss_bytes": 140984320,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 15.287210338192407
+        },
+        {
+          "capacity_rejection_count": 9,
+          "capacity_rejections": [
+            {
+              "client_index": 3,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 6,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 10,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 11,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 12,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 13,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 14,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 15,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 16,
+          "correct_operations": 932,
+          "health_probe_errors": [],
+          "health_requests": 576,
+          "latency_p50_ms": 473.9987920038402,
+          "latency_p95_ms": 735.8423329424113,
+          "owner_peak_rss_bytes": null,
+          "server_peak_rss_bytes": 128598016,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 15.19840179409028
+        }
+      ],
+      "final_slow_reader": {
+        "capacity_rejection": null,
+        "elapsed_seconds": 53.033381124958396,
+        "health_probe_errors": [],
+        "health_requests": 496,
+        "owner_peak_rss_bytes": null,
+        "rows": 1000000,
+        "server_peak_rss_bytes": 128450560
+      },
+      "owner_mode": "local",
+      "owner_shutdown_graceful": null,
+      "queue_timeout_ms": 5000,
+      "reader_reattachable": true,
+      "report": "phase-420-duckdb-v38-load-reattachable-local.json.gz",
+      "result": "capacity_rejections_observed",
+      "server_shutdown_graceful": true,
+      "sha256": "28b3e11d6119c65a65b71c924c7cfb2f554be7694c2fba61f0bef7d3e373825c",
+      "source_dirty_sha256": "f5fffad2204073f2562a7cacb5a96c4505523c14c1617aa6ea6e6931358b0097"
+    },
+    "quack_active2_nonreattachable": {
+      "active_operations": 2,
+      "capacity_rejection_count": 27,
+      "cohorts": [
+        {
+          "capacity_rejection_count": 1,
+          "capacity_rejections": [
+            {
+              "diagnostic": "Connect response stream stalled without progress",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 1,
+          "correct_operations": 460,
+          "health_probe_errors": [],
+          "health_requests": 561,
+          "latency_p50_ms": 104.85154204070568,
+          "latency_p95_ms": 170.7859579473734,
+          "owner_peak_rss_bytes": 106299392,
+          "server_peak_rss_bytes": 159645696,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 7.623452506727009
+        },
+        {
+          "capacity_rejection_count": 3,
+          "capacity_rejections": [
+            {
+              "client_index": 1,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 2,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 4,
+          "correct_operations": 768,
+          "health_probe_errors": [],
+          "health_requests": 562,
+          "latency_p50_ms": 160.27187486179173,
+          "latency_p95_ms": 216.7322498280555,
+          "owner_peak_rss_bytes": 106283008,
+          "server_peak_rss_bytes": 160579584,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 12.710691240839326
+        },
+        {
+          "capacity_rejection_count": 7,
+          "capacity_rejections": [
+            {
+              "client_index": 1,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 2,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 3,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 4,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 6,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 7,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 8,
+          "correct_operations": 760,
+          "health_probe_errors": [],
+          "health_requests": 563,
+          "latency_p50_ms": 157.17087499797344,
+          "latency_p95_ms": 215.99504188634455,
+          "owner_peak_rss_bytes": 106299392,
+          "server_peak_rss_bytes": 163201024,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 12.588500766530435
+        },
+        {
+          "capacity_rejection_count": 15,
+          "capacity_rejections": [
+            {
+              "client_index": 0,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 1,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 2,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 3,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 4,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 5,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 6,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 7,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 8,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 10,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 11,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 12,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 13,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 14,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 16,
+          "correct_operations": 760,
+          "health_probe_errors": [],
+          "health_requests": 564,
+          "latency_p50_ms": 158.5009580012411,
+          "latency_p95_ms": 215.10124998167157,
+          "owner_peak_rss_bytes": 92143616,
+          "server_peak_rss_bytes": 147357696,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 12.561912849282484
+        }
+      ],
+      "final_slow_reader": {
+        "capacity_rejection": {
+          "diagnostic": "Connect response stream stalled without progress",
+          "source": "final_slow_reader",
+          "status": "DEADLINE_EXCEEDED"
+        },
+        "elapsed_seconds": null,
+        "health_probe_errors": [],
+        "health_requests": 369,
+        "owner_peak_rss_bytes": 92405760,
+        "rows": null,
+        "server_peak_rss_bytes": 148422656
+      },
+      "owner_mode": "quack",
+      "owner_shutdown_graceful": true,
+      "queue_timeout_ms": 5000,
+      "reader_reattachable": false,
+      "report": "phase-420-duckdb-v38-load-quack-active2-nonreattachable.json.gz",
+      "result": "capacity_rejections_observed",
+      "server_shutdown_graceful": true,
+      "sha256": "e6b4ae38b5465363ee8dce762e909e3811219c42df4dba898ecb2dce516c7da2",
+      "source_dirty_sha256": "a6f9fa23bf6cd319ab7c3cc2e9306a4c00865f9d91a7eac48aca2ff5a78e15d0"
+    },
+    "quack_active2_reattachable": {
+      "active_operations": 2,
+      "capacity_rejection_count": 25,
+      "cohorts": [
+        {
+          "capacity_rejection_count": 0,
+          "capacity_rejections": [],
+          "clients": 1,
+          "correct_operations": 72,
+          "health_probe_errors": [],
+          "health_requests": 556,
+          "latency_p50_ms": 107.45833301916718,
+          "latency_p95_ms": 168.06687484495342,
+          "owner_peak_rss_bytes": 106070016,
+          "server_peak_rss_bytes": 155467776,
+          "slow_reader_elapsed_seconds": 53.08763291593641,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": 1000000,
+          "throughput_operations_per_second": 1.1984283793431845
+        },
+        {
+          "capacity_rejection_count": 3,
+          "capacity_rejections": [
+            {
+              "client_index": 0,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 2,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 4,
+          "correct_operations": 764,
+          "health_probe_errors": [],
+          "health_requests": 563,
+          "latency_p50_ms": 158.2991669420153,
+          "latency_p95_ms": 215.99004114978015,
+          "owner_peak_rss_bytes": 106070016,
+          "server_peak_rss_bytes": 157188096,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 12.660377555885784
+        },
+        {
+          "capacity_rejection_count": 7,
+          "capacity_rejections": [
+            {
+              "client_index": 0,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 1,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 2,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 3,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 4,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 5,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 8,
+          "correct_operations": 764,
+          "health_probe_errors": [],
+          "health_requests": 564,
+          "latency_p50_ms": 160.35837517119944,
+          "latency_p95_ms": 217.58841699920595,
+          "owner_peak_rss_bytes": 84557824,
+          "server_peak_rss_bytes": 136527872,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 12.638034879711249
+        },
+        {
+          "capacity_rejection_count": 15,
+          "capacity_rejections": [
+            {
+              "client_index": 0,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 1,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 3,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 4,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 5,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 6,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 7,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 8,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 9,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 10,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 11,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 13,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 14,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 15,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 16,
+          "correct_operations": 744,
+          "health_probe_errors": [],
+          "health_requests": 563,
+          "latency_p50_ms": 158.72712479904294,
+          "latency_p95_ms": 217.58425002917647,
+          "owner_peak_rss_bytes": 90963968,
+          "server_peak_rss_bytes": 147636224,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 12.317866128296496
+        }
+      ],
+      "final_slow_reader": {
+        "capacity_rejection": null,
+        "elapsed_seconds": 53.18722074991092,
+        "health_probe_errors": [],
+        "health_requests": 496,
+        "owner_peak_rss_bytes": 90947584,
+        "rows": 1000000,
+        "server_peak_rss_bytes": 147636224
+      },
+      "owner_mode": "quack",
+      "owner_shutdown_graceful": true,
+      "queue_timeout_ms": 5000,
+      "reader_reattachable": true,
+      "report": "phase-420-duckdb-v38-load-quack-active2-reattachable.json.gz",
+      "result": "capacity_rejections_observed",
+      "server_shutdown_graceful": true,
+      "sha256": "9e09d876345c467670d227cc4374c6a6b02b58e55853ff9094c07419b8d95766",
+      "source_dirty_sha256": "eca8829417dee41af2ee7d5e020f8c309cbca9044a93d4ae82dc7f2f5361fae9"
+    },
+    "quack_active4_nonreattachable": {
+      "active_operations": 4,
+      "capacity_rejection_count": 21,
+      "cohorts": [
+        {
+          "capacity_rejection_count": 1,
+          "capacity_rejections": [
+            {
+              "diagnostic": "Connect response stream stalled without progress",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 1,
+          "correct_operations": 456,
+          "health_probe_errors": [],
+          "health_requests": 557,
+          "latency_p50_ms": 105.61754205264151,
+          "latency_p95_ms": 170.36479199305177,
+          "owner_peak_rss_bytes": 106004480,
+          "server_peak_rss_bytes": 159285248,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 7.592624487739999
+        },
+        {
+          "capacity_rejection_count": 1,
+          "capacity_rejections": [
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 4,
+          "correct_operations": 788,
+          "health_probe_errors": [],
+          "health_requests": 569,
+          "latency_p50_ms": 289.39033299684525,
+          "latency_p95_ms": 402.8285830281675,
+          "owner_peak_rss_bytes": 105988096,
+          "server_peak_rss_bytes": 160759808,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 12.983346861199202
+        },
+        {
+          "capacity_rejection_count": 5,
+          "capacity_rejections": [
+            {
+              "client_index": 0,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 1,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 3,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 4,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 8,
+          "correct_operations": 784,
+          "health_probe_errors": [],
+          "health_requests": 568,
+          "latency_p50_ms": 288.6134998407215,
+          "latency_p95_ms": 402.94258296489716,
+          "owner_peak_rss_bytes": 105988096,
+          "server_peak_rss_bytes": 163233792,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 12.89084332509198
+        },
+        {
+          "capacity_rejection_count": 13,
+          "capacity_rejections": [
+            {
+              "client_index": 0,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 1,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 2,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 4,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 6,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 7,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 8,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 10,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 11,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 12,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 14,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 15,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 16,
+          "correct_operations": 780,
+          "health_probe_errors": [],
+          "health_requests": 567,
+          "latency_p50_ms": 285.1546660531312,
+          "latency_p95_ms": 401.8709999509156,
+          "owner_peak_rss_bytes": 81379328,
+          "server_peak_rss_bytes": 140574720,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 12.842529778313208
+        }
+      ],
+      "final_slow_reader": {
+        "capacity_rejection": {
+          "diagnostic": "Connect response stream stalled without progress",
+          "source": "final_slow_reader",
+          "status": "DEADLINE_EXCEEDED"
+        },
+        "elapsed_seconds": null,
+        "health_probe_errors": [],
+        "health_requests": 371,
+        "owner_peak_rss_bytes": 91029504,
+        "rows": null,
+        "server_peak_rss_bytes": 147570688
+      },
+      "owner_mode": "quack",
+      "owner_shutdown_graceful": true,
+      "queue_timeout_ms": 5000,
+      "reader_reattachable": false,
+      "report": "phase-420-duckdb-v38-load-quack-active4-nonreattachable.json.gz",
+      "result": "capacity_rejections_observed",
+      "server_shutdown_graceful": true,
+      "sha256": "1cbe04a6753bda0aa31bb9e245da349d26612c8cd38d89b9ac3d2e6ae92e4ea4",
+      "source_dirty_sha256": "a6f9fa23bf6cd319ab7c3cc2e9306a4c00865f9d91a7eac48aca2ff5a78e15d0"
+    },
+    "quack_active4_reattachable": {
+      "active_operations": 4,
+      "capacity_rejection_count": 19,
+      "cohorts": [
+        {
+          "capacity_rejection_count": 0,
+          "capacity_rejections": [],
+          "clients": 1,
+          "correct_operations": 72,
+          "health_probe_errors": [],
+          "health_requests": 557,
+          "latency_p50_ms": 107.27849998511374,
+          "latency_p95_ms": 175.7619590498507,
+          "owner_peak_rss_bytes": 106086400,
+          "server_peak_rss_bytes": 155533312,
+          "slow_reader_elapsed_seconds": 53.10010287514888,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": 1000000,
+          "throughput_operations_per_second": 1.1984891845311907
+        },
+        {
+          "capacity_rejection_count": 1,
+          "capacity_rejections": [
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 4,
+          "correct_operations": 784,
+          "health_probe_errors": [],
+          "health_requests": 566,
+          "latency_p50_ms": 287.38170792348683,
+          "latency_p95_ms": 413.4847498498857,
+          "owner_peak_rss_bytes": 106086400,
+          "server_peak_rss_bytes": 157155328,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 12.93701057214756
+        },
+        {
+          "capacity_rejection_count": 5,
+          "capacity_rejections": [
+            {
+              "client_index": 1,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 3,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 4,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 7,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 8,
+          "correct_operations": 776,
+          "health_probe_errors": [],
+          "health_requests": 565,
+          "latency_p50_ms": 289.23520795069635,
+          "latency_p95_ms": 408.2024588715285,
+          "owner_peak_rss_bytes": 81461248,
+          "server_peak_rss_bytes": 139116544,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 12.824206699281993
+        },
+        {
+          "capacity_rejection_count": 13,
+          "capacity_rejections": [
+            {
+              "client_index": 0,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 1,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 2,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 5,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 6,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 8,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 9,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 10,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 11,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 12,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 13,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 15,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 16,
+          "correct_operations": 776,
+          "health_probe_errors": [],
+          "health_requests": 567,
+          "latency_p50_ms": 286.64658311754465,
+          "latency_p95_ms": 411.0554999206215,
+          "owner_peak_rss_bytes": 81461248,
+          "server_peak_rss_bytes": 143130624,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 12.795244900113579
+        }
+      ],
+      "final_slow_reader": {
+        "capacity_rejection": null,
+        "elapsed_seconds": 53.01850829087198,
+        "health_probe_errors": [],
+        "health_requests": 492,
+        "owner_peak_rss_bytes": 81461248,
+        "rows": 1000000,
+        "server_peak_rss_bytes": 143081472
+      },
+      "owner_mode": "quack",
+      "owner_shutdown_graceful": true,
+      "queue_timeout_ms": 5000,
+      "reader_reattachable": true,
+      "report": "phase-420-duckdb-v38-load-quack-active4-reattachable.json.gz",
+      "result": "capacity_rejections_observed",
+      "server_shutdown_graceful": true,
+      "sha256": "5d67504202fa746f2d9f552ca338fd79d2ee2a9fbd7de611e780faf9820e7024",
+      "source_dirty_sha256": "eca8829417dee41af2ee7d5e020f8c309cbca9044a93d4ae82dc7f2f5361fae9"
+    },
+    "quack_active8_nonreattachable": {
+      "active_operations": 8,
+      "capacity_rejection_count": 13,
+      "cohorts": [
+        {
+          "capacity_rejection_count": 1,
+          "capacity_rejections": [
+            {
+              "diagnostic": "Connect response stream stalled without progress",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 1,
+          "correct_operations": 460,
+          "health_probe_errors": [],
+          "health_requests": 559,
+          "latency_p50_ms": 105.51787493750453,
+          "latency_p95_ms": 171.09041707590222,
+          "owner_peak_rss_bytes": 105758720,
+          "server_peak_rss_bytes": 159105024,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 7.637912440461535
+        },
+        {
+          "capacity_rejection_count": 1,
+          "capacity_rejections": [
+            {
+              "diagnostic": "Connect response stream stalled without progress",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 4,
+          "correct_operations": 652,
+          "health_probe_errors": [],
+          "health_requests": 567,
+          "latency_p50_ms": 288.28337509185076,
+          "latency_p95_ms": 414.4049999304116,
+          "owner_peak_rss_bytes": 106102784,
+          "server_peak_rss_bytes": 161906688,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 10.738096248543844
+        },
+        {
+          "capacity_rejection_count": 1,
+          "capacity_rejections": [
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 8,
+          "correct_operations": 800,
+          "health_probe_errors": [],
+          "health_requests": 576,
+          "latency_p50_ms": 515.2495000511408,
+          "latency_p95_ms": 875.8135831449181,
+          "owner_peak_rss_bytes": 82247680,
+          "server_peak_rss_bytes": 140312576,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 12.992554763405781
+        },
+        {
+          "capacity_rejection_count": 9,
+          "capacity_rejections": [
+            {
+              "client_index": 2,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 3,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 7,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 8,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 9,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 10,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 11,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 14,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 16,
+          "correct_operations": 780,
+          "health_probe_errors": [],
+          "health_requests": 571,
+          "latency_p50_ms": 538.084666011855,
+          "latency_p95_ms": 865.7061250414699,
+          "owner_peak_rss_bytes": 82378752,
+          "server_peak_rss_bytes": 144719872,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 12.750634504056187
+        }
+      ],
+      "final_slow_reader": {
+        "capacity_rejection": {
+          "diagnostic": "Connect response stream stalled without progress",
+          "source": "final_slow_reader",
+          "status": "DEADLINE_EXCEEDED"
+        },
+        "elapsed_seconds": null,
+        "health_probe_errors": [],
+        "health_requests": 372,
+        "owner_peak_rss_bytes": 91144192,
+        "rows": null,
+        "server_peak_rss_bytes": 148193280
+      },
+      "owner_mode": "quack",
+      "owner_shutdown_graceful": true,
+      "queue_timeout_ms": 5000,
+      "reader_reattachable": false,
+      "report": "phase-420-duckdb-v38-load-quack-active8-nonreattachable.json.gz",
+      "result": "capacity_rejections_observed",
+      "server_shutdown_graceful": true,
+      "sha256": "8d0ec72c5dae8b812eae2024cbe1f22e82075dd02d495530102a113d53387b69",
+      "source_dirty_sha256": "eca8829417dee41af2ee7d5e020f8c309cbca9044a93d4ae82dc7f2f5361fae9"
+    },
+    "quack_active8_reattachable": {
+      "active_operations": 8,
+      "capacity_rejection_count": 10,
+      "cohorts": [
+        {
+          "capacity_rejection_count": 0,
+          "capacity_rejections": [],
+          "clients": 1,
+          "correct_operations": 92,
+          "health_probe_errors": [],
+          "health_requests": 569,
+          "latency_p50_ms": 95.55924986489117,
+          "latency_p95_ms": 168.42962498776615,
+          "owner_peak_rss_bytes": 105938944,
+          "server_peak_rss_bytes": 155451392,
+          "slow_reader_elapsed_seconds": 51.929023834178224,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": 1000000,
+          "throughput_operations_per_second": 1.5263589582847976
+        },
+        {
+          "capacity_rejection_count": 0,
+          "capacity_rejections": [],
+          "clients": 4,
+          "correct_operations": 136,
+          "health_probe_errors": [],
+          "health_requests": 577,
+          "latency_p50_ms": 265.326791908592,
+          "latency_p95_ms": 404.76958407089114,
+          "owner_peak_rss_bytes": 81707008,
+          "server_peak_rss_bytes": 134184960,
+          "slow_reader_elapsed_seconds": 51.9692687089555,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": 1000000,
+          "throughput_operations_per_second": 2.2360423416576727
+        },
+        {
+          "capacity_rejection_count": 1,
+          "capacity_rejections": [
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 8,
+          "correct_operations": 864,
+          "health_probe_errors": [],
+          "health_requests": 586,
+          "latency_p50_ms": 492.4130409490317,
+          "latency_p95_ms": 758.7802091147751,
+          "owner_peak_rss_bytes": 91062272,
+          "server_peak_rss_bytes": 143409152,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 14.125777594199416
+        },
+        {
+          "capacity_rejection_count": 9,
+          "capacity_rejections": [
+            {
+              "client_index": 2,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 3,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 6,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 8,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 9,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 10,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 11,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 13,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 16,
+          "correct_operations": 852,
+          "health_probe_errors": [],
+          "health_requests": 586,
+          "latency_p50_ms": 472.9762920178473,
+          "latency_p95_ms": 784.1189170721918,
+          "owner_peak_rss_bytes": 90865664,
+          "server_peak_rss_bytes": 143163392,
+          "slow_reader_elapsed_seconds": null,
+          "slow_reader_rejection": null,
+          "slow_reader_rows": null,
+          "throughput_operations_per_second": 13.937493722771826
+        }
+      ],
+      "final_slow_reader": {
+        "capacity_rejection": null,
+        "elapsed_seconds": 52.09081362513825,
+        "health_probe_errors": [],
+        "health_requests": 491,
+        "owner_peak_rss_bytes": 81428480,
+        "rows": 1000000,
+        "server_peak_rss_bytes": 139935744
+      },
+      "owner_mode": "quack",
+      "owner_shutdown_graceful": true,
+      "queue_timeout_ms": 5000,
+      "reader_reattachable": true,
+      "report": "phase-420-duckdb-v38-load-quack-reattachable-local.json.gz",
+      "result": "capacity_rejections_observed",
+      "server_shutdown_graceful": true,
+      "sha256": "05f354fb81e8f6820c59deff00950cc44b3b00c0ad3078a976cad06ebe54c901",
+      "source_dirty_sha256": "40b90ece5ad076afb6b47453137f5a67df41a355e093e377c07e9bba50b2f110"
+    }
+  },
+  "phase": "4.20",
+  "platform": "macOS-26.5.2-arm64-arm-64bit",
+  "pyspark_client": "4.0.5",
+  "python": "3.11.15",
+  "reader_modes": {
+    "non_reattachable": {
+      "capacity_rejection_count": 13,
+      "cohorts": [
+        {
+          "capacity_rejections": [
+            {
+              "diagnostic": "Connect response stream stalled without progress",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 1,
+          "correct_operations": 512,
+          "duration_seconds": 60,
+          "health_requests": 562,
+          "http_sql_requests": 0,
+          "latency_p50_ms": 92.8231249563396,
+          "latency_p95_ms": 163.53575000539422,
+          "operations_per_second": 8.489039464855747,
+          "server_peak_rss_bytes": 137707520,
+          "slow_reader_rows": null
+        },
+        {
+          "capacity_rejections": [
+            {
+              "diagnostic": "Connect response stream stalled without progress",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 4,
+          "correct_operations": 768,
+          "duration_seconds": 60,
+          "health_requests": 567,
+          "http_sql_requests": 0,
+          "latency_p50_ms": 248.29091597348452,
+          "latency_p95_ms": 356.7092081066221,
+          "operations_per_second": 12.67467601613614,
+          "server_peak_rss_bytes": 139427840,
+          "slow_reader_rows": null
+        },
+        {
+          "capacity_rejections": [
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 8,
+          "correct_operations": 940,
+          "duration_seconds": 60,
+          "health_requests": 577,
+          "http_sql_requests": 0,
+          "latency_p50_ms": 460.6491669546813,
+          "latency_p95_ms": 739.5297500770539,
+          "operations_per_second": 15.289847141595244,
+          "server_peak_rss_bytes": 141541376,
+          "slow_reader_rows": null
+        },
+        {
+          "capacity_rejections": [
+            {
+              "client_index": 0,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 1,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 2,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 5,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 11,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 12,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 13,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "client_index": 15,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "SERVER_QUEUE_TIMEOUT"
+            },
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 16,
+          "correct_operations": 920,
+          "duration_seconds": 60,
+          "health_requests": 571,
+          "http_sql_requests": 0,
+          "latency_p50_ms": 457.2570421732962,
+          "latency_p95_ms": 763.0944580305368,
+          "operations_per_second": 15.075769393264693,
+          "server_peak_rss_bytes": 127533056,
+          "slow_reader_rows": null
+        }
+      ],
+      "final_slow_reader": {
+        "capacity_rejection": {
+          "diagnostic": "Connect response stream stalled without progress",
+          "source": "final_slow_reader",
+          "status": "DEADLINE_EXCEEDED"
+        },
+        "health_requests": 374,
+        "rows": null,
+        "server_peak_rss_bytes": 127500288,
+        "wall_seconds": 40.146745749982074
+      },
+      "graceful_shutdown": true,
+      "raw_report": "docs/plans/sparkless-server/evidence/phase-420-duckdb-v38-load-nonreattachable-local.json.gz",
+      "raw_report_sha256": "afde4bc3120cf73b08dc44021da6ed86060cabae7748a1ab4c96a6009e8b5b32",
+      "reader_reattachable": false,
+      "result": "capacity_rejections_observed",
+      "source_dirty_sha256": "d948ba2dba1ee29fa355abc630e3b65d504da88b80406f81472bdee00e7f800b"
+    },
+    "reattachable": {
+      "capacity_rejection_count": 10,
+      "cohorts": [
+        {
+          "capacity_rejections": [],
+          "clients": 1,
+          "correct_operations": 80,
+          "duration_seconds": 60,
+          "health_requests": 560,
+          "http_sql_requests": 0,
+          "latency_p50_ms": 94.920750008896,
+          "latency_p95_ms": 163.10137510299683,
+          "operations_per_second": 1.3319296080831453,
+          "server_peak_rss_bytes": 137543680,
+          "slow_reader_rows": 1000000
+        },
+        {
+          "capacity_rejections": [],
+          "clients": 4,
+          "correct_operations": 128,
+          "duration_seconds": 60,
+          "health_requests": 565,
+          "http_sql_requests": 0,
+          "latency_p50_ms": 249.4130830746144,
+          "latency_p95_ms": 361.94837489165366,
+          "operations_per_second": 2.115919531589213,
+          "server_peak_rss_bytes": 139116544,
+          "slow_reader_rows": 1000000
+        },
+        {
+          "capacity_rejections": [
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 8,
+          "correct_operations": 928,
+          "duration_seconds": 60,
+          "health_requests": 570,
+          "http_sql_requests": 0,
+          "latency_p50_ms": 467.720584012568,
+          "latency_p95_ms": 732.1423750836402,
+          "operations_per_second": 15.287210338192407,
+          "server_peak_rss_bytes": 140984320,
+          "slow_reader_rows": null
+        },
+        {
+          "capacity_rejections": [
+            {
+              "client_index": 3,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 6,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 10,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 11,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 12,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 13,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 14,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "client_index": 15,
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "client",
+              "status": "DEADLINE_EXCEEDED"
+            },
+            {
+              "diagnostic": "timed out waiting for Connect compute admission",
+              "source": "slow_reader",
+              "status": "DEADLINE_EXCEEDED"
+            }
+          ],
+          "clients": 16,
+          "correct_operations": 932,
+          "duration_seconds": 60,
+          "health_requests": 576,
+          "http_sql_requests": 0,
+          "latency_p50_ms": 473.9987920038402,
+          "latency_p95_ms": 735.8423329424113,
+          "operations_per_second": 15.19840179409028,
+          "server_peak_rss_bytes": 128598016,
+          "slow_reader_rows": null
+        }
+      ],
+      "final_slow_reader": {
+        "capacity_rejection": null,
+        "health_requests": 496,
+        "rows": 1000000,
+        "server_peak_rss_bytes": 128450560,
+        "wall_seconds": 53.37385908397846
+      },
+      "graceful_shutdown": true,
+      "raw_report": "docs/plans/sparkless-server/evidence/phase-420-duckdb-v38-load-reattachable-local.json.gz",
+      "raw_report_sha256": "28b3e11d6119c65a65b71c924c7cfb2f554be7694c2fba61f0bef7d3e373825c",
+      "reader_reattachable": true,
+      "result": "capacity_rejections_observed",
+      "source_dirty_sha256": "f5fffad2204073f2562a7cacb5a96c4505523c14c1617aa6ea6e6931358b0097"
+    }
+  },
+  "result": "incomplete; admission and response-stall failures recorded",
+  "run_date_utc": "2026-11-06",
+  "server_binary_sha256": "5615d184a4818c5862c4a3d92b2719b21991a44c8fc1d6e011fa9072a33cd5f3",
+  "settings": {
+    "active_operations": 8,
+    "active_operations_tested": [
+      2,
+      4,
+      8
+    ],
+    "collect_rows": 100000,
+    "concurrency": [
+      1,
+      4,
+      8,
+      16
+    ],
+    "count_rows": 1000000,
+    "duration_seconds_per_client": 60,
+    "health_probes": "must pass during load",
+    "http_sql": "disabled in DuckDB backend",
+    "local_owner": "one embedded persistent DuckDB owner; its RSS is included in server process RSS",
+    "queue_timeout_ms": 5000,
+    "reader_mode_matrix": {
+      "non_reattachable": [
+        "local_owner",
+        "shared_quack"
+      ],
+      "reattachable": [
+        "local_owner",
+        "shared_quack"
+      ]
+    },
+    "slow_reader_pause_ms": 100,
+    "slow_reader_rows": 1000000
+  },
+  "shared_quack_owner": {
+    "capacity_rejection_count": 10,
+    "cohorts": [
+      {
+        "capacity_rejections": [],
+        "clients": 1,
+        "correct_operations": 92,
+        "duration_seconds": 60,
+        "health_requests": 569,
+        "latency_p50_ms": 95.55924986489117,
+        "latency_p95_ms": 168.42962498776615,
+        "operations_per_second": 1.5263589582847976,
+        "owner_peak_rss_bytes": 105938944,
+        "server_peak_rss_bytes": 155451392,
+        "slow_reader_rows": 1000000
+      },
+      {
+        "capacity_rejections": [],
+        "clients": 4,
+        "correct_operations": 136,
+        "duration_seconds": 60,
+        "health_requests": 577,
+        "latency_p50_ms": 265.326791908592,
+        "latency_p95_ms": 404.76958407089114,
+        "operations_per_second": 2.2360423416576727,
+        "owner_peak_rss_bytes": 81707008,
+        "server_peak_rss_bytes": 134184960,
+        "slow_reader_rows": 1000000
+      },
+      {
+        "capacity_rejections": [
+          {
+            "diagnostic": "timed out waiting for Connect compute admission",
+            "source": "slow_reader",
+            "status": "DEADLINE_EXCEEDED"
+          }
+        ],
+        "clients": 8,
+        "correct_operations": 864,
+        "duration_seconds": 60,
+        "health_requests": 586,
+        "latency_p50_ms": 492.4130409490317,
+        "latency_p95_ms": 758.7802091147751,
+        "operations_per_second": 14.125777594199416,
+        "owner_peak_rss_bytes": 91062272,
+        "server_peak_rss_bytes": 143409152,
+        "slow_reader_rows": null
+      },
+      {
+        "capacity_rejections": [
+          {
+            "client_index": 2,
+            "diagnostic": "timed out waiting for Connect compute admission",
+            "source": "client",
+            "status": "DEADLINE_EXCEEDED"
+          },
+          {
+            "client_index": 3,
+            "diagnostic": "timed out waiting for Connect compute admission",
+            "source": "client",
+            "status": "DEADLINE_EXCEEDED"
+          },
+          {
+            "client_index": 6,
+            "diagnostic": "timed out waiting for Connect compute admission",
+            "source": "client",
+            "status": "DEADLINE_EXCEEDED"
+          },
+          {
+            "client_index": 8,
+            "diagnostic": "timed out waiting for Connect compute admission",
+            "source": "client",
+            "status": "DEADLINE_EXCEEDED"
+          },
+          {
+            "client_index": 9,
+            "diagnostic": "timed out waiting for Connect compute admission",
+            "source": "client",
+            "status": "DEADLINE_EXCEEDED"
+          },
+          {
+            "client_index": 10,
+            "diagnostic": "timed out waiting for Connect compute admission",
+            "source": "client",
+            "status": "DEADLINE_EXCEEDED"
+          },
+          {
+            "client_index": 11,
+            "diagnostic": "timed out waiting for Connect compute admission",
+            "source": "client",
+            "status": "DEADLINE_EXCEEDED"
+          },
+          {
+            "client_index": 13,
+            "diagnostic": "timed out waiting for Connect compute admission",
+            "source": "client",
+            "status": "DEADLINE_EXCEEDED"
+          },
+          {
+            "diagnostic": "timed out waiting for Connect compute admission",
+            "source": "slow_reader",
+            "status": "DEADLINE_EXCEEDED"
+          }
+        ],
+        "clients": 16,
+        "correct_operations": 852,
+        "duration_seconds": 60,
+        "health_requests": 586,
+        "latency_p50_ms": 472.9762920178473,
+        "latency_p95_ms": 784.1189170721918,
+        "operations_per_second": 13.937493722771826,
+        "owner_peak_rss_bytes": 90865664,
+        "server_peak_rss_bytes": 143163392,
+        "slow_reader_rows": null
+      }
+    ],
+    "final_slow_reader": {
+      "capacity_rejection": null,
+      "health_requests": 491,
+      "owner_peak_rss_bytes": 81428480,
+      "rows": 1000000,
+      "server_peak_rss_bytes": 139935744,
+      "wall_seconds": 52.53815445792861
+    },
+    "owner": {
+      "binary_sha256": "e71fd5f4f5bbdf1425e448b0aa3779ac75e106c325dfaee93e9af6093f8131bb",
+      "credentials_redacted_in_report": true,
+      "extension_sha256": "ef547f01cb30412aa6dbade59bdd5254ed897ba4f113a1700e3e01e00a747935",
+      "graceful_shutdown": true,
+      "separate_rss_sampling": true,
+      "uri": "quack:localhost:60532"
+    },
+    "report": "docs/plans/sparkless-server/evidence/phase-420-duckdb-v38-load-quack-reattachable-local.json.gz",
+    "report_sha256": "05f354fb81e8f6820c59deff00950cc44b3b00c0ad3078a976cad06ebe54c901",
+    "result": "capacity_rejections_observed",
+    "source_dirty_sha256": "40b90ece5ad076afb6b47453137f5a67df41a355e093e377c07e9bba50b2f110"
+  },
+  "source_revision": "0b5c59fe198b3e06595f10e8c95e843eb956c703"
+}

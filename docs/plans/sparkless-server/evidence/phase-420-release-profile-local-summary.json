@@ -1,0 +1,207 @@
+{
+  "format_version": 1,
+  "limitations": [
+    "Local macOS arm64 only; CI was not used.",
+    "Release-profile executables and local wheels are local builds, not exact or published 4.20.0 artifacts.",
+    "One local POSIX RLIMIT_FSIZE COMMIT fault recovered with zero rows and zero receipts; other partial-I/O outcomes and cross-platform fault behavior remain unverified.",
+    "The local capacity runs need an accepted resource envelope and latency/RSS budget; full multi-operation cleanup and exact release-artifact checks remain release gates.",
+    "Isolated performance attribution found one non-repeated p50 budget breach in the #1739 near-limit workload and one in the #1741 Arrow-sharing workload; the variants are measured on one host and their executables are not retained."
+  ],
+  "passed_checks": {
+    "backend_startup_selection": {
+      "probe_count": 6,
+      "report": "phase-420-backend-startup-final-release-local.json",
+      "report_sha256": "b47707f3fa49902950aaf8de9d4b11227b7859385280e2dd9b0d31cf88a9f4fe",
+      "result": "passed",
+      "runner_sha256": "762e99fa5b8dad5467f25228b658c1eb2c0399ab67b2881e39a8f10788881f69"
+    },
+    "duckdb_public_connect_execution": {
+      "command": "PYTHONPATH=python/server-duckdb:python/connect /tmp/sparkless-phase420-client-py311/bin/python tests/connect/smoke_phase420_duckdb_execution.py --server-bin target/release/sparkless-server-duckdb",
+      "result": "passed",
+      "server_sha256": "06286564b7b10890b6a6d98fad6cb8276beb8292431efcb8387f1f62f764ec6d"
+    },
+    "duckdb_storage_commit_fault_local": {
+      "report": "phase-420-duckdb-storage-commit-fault-local.json",
+      "report_sha256": "a3c541ae4b6392cf4c6a05f8d04ef946d40a947411fbee37b3fee6a4678f2cc3",
+      "result": "passed; unknown outcome reported, reopened database contained zero rows and zero receipts",
+      "standard_duckdb_owner_tests": "19 passed, 0 failed, 1 ignored",
+      "test_binary_sha256": "3253d62c9618eb52707721a79e013171df305c74f4c843fb5a871ac228b208ac",
+      "cleanup_regressions": [
+        "cancelled_read_pool_waiter_releases_queue_slot_and_connections_return",
+        "invalidated_checked_out_read_connection_is_closed_when_returned"
+      ]
+    },
+    "local_candidate_wheel_verification": {
+      "base_server_wheel_sha256": "e0fc915c731ee7d3c753777dbef1af91392e091dc0da1d641253fa08d4e1a6c7",
+      "duckdb_server_wheel_sha256": "27da2d72ae340a2c706be809cbd4fee84c2348f4feab007849e60996dab23d7f",
+      "report": "phase-420-local-package-smokes.json",
+      "report_sha256": "758570baa8519c7bee0127ce5d5586ae476e6cbb46a02fdf49b566cb751eb961",
+      "result": "passed; local macOS wheels carry 4.19.0 metadata and are not exact 4.20.0 artifacts",
+      "sparkless_testing_wheel_sha256": "45c5d3b097bf39c05dea1254cd4664ea2795dc03e53d33b21722c44de9a4a977"
+    },
+    "local_owner_write_reattachment_and_restart_replay": {
+      "report": "phase-420-duckdb-write-reattach-final-release-local.json",
+      "report_sha256": "95b60bf2414e8e7ec4fa337c0911cc7a2c5b9778f08c9e1a6a9af13def15b17d",
+      "result": "passed",
+      "runner_sha256": "193e9bfa95d03c30a88394a0d9aac3bc41813c72dec59f128818a9516498e831",
+      "server_sha256": "06286564b7b10890b6a6d98fad6cb8276beb8292431efcb8387f1f62f764ec6d"
+    },
+    "local_rust_validation": {
+      "duckdb_owner_unit_tests": "19 passed, 0 failed, 1 ignored",
+      "polars_sql_library_tests": "414 passed, 0 failed, 2 ignored",
+      "server_http_connect_duckdb_source_unit_tests": "101 passed, 0 failed, 0 ignored",
+      "strict_clippy": "passed for robin-sparkless-duckdb and sparkless-server-polars with HTTP, Connect, and DuckDB-source features",
+      "duckdb_read_pool_cleanup_regressions": 2
+    },
+    "python_workspace_validation": {
+      "report": "phase-420-sparkless-testing-local.json",
+      "report_sha256": "5b49f5f215a466a0ae4656835340644f4428e01df731f017de15c570305fd717",
+      "result": "passed",
+      "subtests_passed": 7,
+      "tests_passed": 157
+    },
+    "shared_quack_owner_lifecycle_and_restart_replay": {
+      "extension_sha256": "ef547f01cb30412aa6dbade59bdd5254ed897ba4f113a1700e3e01e00a747935",
+      "health_ready_during_owner_loss": true,
+      "mixed_load_owner_loss_clients": 4,
+      "mixed_load_owner_loss_stream_rows": 1000000,
+      "owner_loss_stream_rows": 1000000,
+      "owner_sha256": "448df3700db8a0a9b8d348064bee3da2811fb679e0a25d3542c35f4624bf105f",
+      "reads_recovered_after_owner_restart": true,
+      "report": "phase-420-quack-execution-final-release-local.json",
+      "report_sha256": "5b651d014b498e7f670ea7482a399e7c62c87a7afe343e334878b3e6859978b3",
+      "result": "passed",
+      "runner_sha256": "bfb1e88584d9c2377d28e834acd95191b1c503476c80619601679df7c181e488",
+      "same_session_retry_succeeded": true,
+      "server_sha256": "06286564b7b10890b6a6d98fad6cb8276beb8292431efcb8387f1f62f764ec6d"
+    },
+    "spark_4_0_5_differential": {
+      "committed_write_witnesses": 6,
+      "matched_result_schema_cases": 44,
+      "query_witnesses": 51,
+      "rejected_forms": 20,
+      "report": "phase-420-duckdb-connect-differential-final-release-local.json.gz",
+      "report_sha256": "b8afb47422fa6a577e7efa2c71daf10777a925d76fe8fc0fdd2a40537d9e27d5",
+      "result": "passed",
+      "runner_sha256": "e0c40330e96788d18a408bfe841fa0de90d3e7daaad038b2396c40b48c9fa4a6",
+      "server_sha256": "06286564b7b10890b6a6d98fad6cb8276beb8292431efcb8387f1f62f764ec6d"
+    },
+    "http_regression_final_release_local": {
+      "baseline_server_sha256": "f7e18a03e728b8b6b548e68c949c879375e00470e7a8a3baf26ea5b587ffa7ca",
+      "candidate_server_sha256": "fc7533b0887c9be002c0716cff005923e302c4c49e4b648746b9bd3d6a220b0c",
+      "report": "phase-420-http-benchmarks-final-release-local.json",
+      "report_sha256": "32eaad7af4248de5c738197ff47d6dfda7863b754033107786fcd2af95c6e3ec",
+      "result": "passed; three rotating pairs, 20 warm samples per workload, matching schemas and response lengths, zero p50/p95 budget breaches",
+      "source_revision": "0b5c59fe198b3e06595f10e8c95e843eb956c703"
+    },
+    "duckdb_connect_backend_active_query_shutdown": {
+      "report": "phase-420-duckdb-backend-shutdown-local.json",
+      "report_sha256": "10ccc1fb0d14128c60bb4128a505d805a2e5cc54815863f3655933c0595cdaa3",
+      "runner_sha256": "d89a0df66f1d0ccf4bf13c18e8ccf87205c1fa7f7a70f575fe20bac2aa8b03c0",
+      "result": "passed; graceful shutdown cancelled a live Quack-backed DuckDB Connect query, owner had no remaining active query, both processes exited 0",
+      "server_sha256": "06286564b7b10890b6a6d98fad6cb8276beb8292431efcb8387f1f62f764ec6d",
+      "owner_sha256": "448df3700db8a0a9b8d348064bee3da2811fb679e0a25d3542c35f4624bf105f",
+      "extension_sha256": "ef547f01cb30412aa6dbade59bdd5254ed897ba4f113a1700e3e01e00a747935"
+    }
+  },
+  "phase": "4.20",
+  "platform": "macOS-26.5.2-arm64-arm-64bit",
+  "release_profile_builds": {
+    "base_server": {
+      "command": "cargo build --locked --release -p sparkless-server --no-default-features --features http,connect",
+      "path": "target/release/sparkless-server",
+      "sha256": "fc7533b0887c9be002c0716cff005923e302c4c49e4b648746b9bd3d6a220b0c"
+    },
+    "duckdb_server": {
+      "command": "cargo build --locked --release -p sparkless-server-duckdb --no-default-features --features http,connect",
+      "path": "target/release/sparkless-server-duckdb",
+      "sha256": "06286564b7b10890b6a6d98fad6cb8276beb8292431efcb8387f1f62f764ec6d"
+    },
+    "quack_fixture_owner": {
+      "command": "cargo build --locked --release -p robin-sparkless-duckdb --example duckdb_quack_fixture_owner",
+      "path": "target/release/examples/duckdb_quack_fixture_owner",
+      "sha256": "448df3700db8a0a9b8d348064bee3da2811fb679e0a25d3542c35f4624bf105f"
+    }
+  },
+  "slice": "420-01/02/03/04 local release-profile acceptance",
+  "source_revision": "0b5c59fe198b3e06595f10e8c95e843eb956c703",
+  "timestamp_utc": "2026-11-06T10:14:27Z",
+  "v38_backpressure": {
+    "reattachable_response_ack_timeout_seconds": 5,
+    "result": "paced non-reattachable stream fix passes locally at active_operations=16 for local and Quack owners",
+    "send_stall_timeout_seconds": 30,
+    "summary": "phase-420-duckdb-v38-backpressure-release-local-summary.json",
+    "summary_sha256": "435c40dcaa2f9e88b69c18aa61f2873037f8c9f6b42cf6e140b1d7e8ccda1750"
+  },
+  "v38_read_pool": {
+    "local_report_sha256": "f6146ea0293f273594fc7fd814701bb11c102dd2bf21dc7288c707c7819ba3a7",
+    "quack_report_sha256": "9ea7959f62ca1c105333ea963bf001c27c1efe82cb6479c0d53baa36ea3c3679",
+    "result": "passed locally against the final release-profile DuckDB server",
+    "runner_sha256": "f589cc2ed74f60ee2f971ac7566dd61966967f9040e713ac599bd6cdb80f6a68",
+    "server_sha256": "06286564b7b10890b6a6d98fad6cb8276beb8292431efcb8387f1f62f764ec6d",
+    "summary": "phase-420-duckdb-v38-read-pool-local-summary.json",
+    "summary_sha256": "1b5253857b97a22f073e5e8e6f228800133f84a4e043c75029058a58ffce8728"
+  },
+  "working_tree_modified": true,
+  "local_performance_attribution": {
+    "result": "completed on macOS arm64 with paired release-profile variants; one non-repeated p50 budget breach each for #1739 and the #1741 Arrow-sharing workload; other measured comparisons had no p50/p95 budget breaches",
+    "candidate_base_server_sha256": "fc7533b0887c9be002c0716cff005923e302c4c49e4b648746b9bd3d6a220b0c",
+    "variant_executables_archived": false,
+    "reports": {
+      "phase-420-http-attribution-1739-local.json": "94ea918e7a73d0c0b4a67e65ca284aace2f1b17e474cc0fdb54e94d8680ae538",
+      "phase-420-http-attribution-1740-local.json": "6c5e4a4576b6af54789d070bea828242405a120c3d659f76fc45949e2551bf2e",
+      "phase-420-scheduler-attribution-1741-local.json.gz": "22ec04e81bd2fcf780afdffd35adc45c99f9ff1c1159c849d49156ff80f3c768",
+      "phase-420-arrow-sharing-attribution-local.json.gz": "c6d28692d02abfb8b9304321f51646699ff289f14b430ce3322eeae67bd055bd",
+      "phase-420-scheduler-attribution-1742-active16-local.json.gz": "d27db45b0da17fc685ed7e1c449dfafdbc32171bdeb5ae995353023e2a8033fa",
+      "phase-420-scheduler-attribution-1742-active8-local.json.gz": "c70be84e9f133c3b2089bc927b8d6cf5c80a626737f3c5cbaa83e2ca6358da75",
+      "phase-420-http-attribution-1743-local.json": "7bad45541619602e1cf60850b04dc5f47a589992c58fc7cd79253c67f65899c7",
+      "phase-420-sql-stage-attribution-local.json": "2875893d6bfe4f3c504ac9955c4e6a13cb467587f9e3b1977bcbb6d939718387"
+    },
+    "key_results": {
+      "1739_near_limit": {
+        "pairs": 6,
+        "p50_budget_breaches": 1,
+        "repeat_run_breaches": 0,
+        "p95_budget_breaches": 0
+      },
+      "1740_near_limit_median_change_ms": {
+        "p50": -2.3732,
+        "p95": -2.1658
+      },
+      "1741_skip_clone": {
+        "client_count": 8,
+        "active_operations": 16,
+        "duration_seconds": 60,
+        "median_throughput_ratio": 0.993,
+        "p50_breaches": 0,
+        "p95_breaches": 0
+      },
+      "1741_arrow_sharing_100k": {
+        "pairs": 3,
+        "median_p50_change_ms": 0.6651,
+        "median_p95_change_ms": -0.5466,
+        "median_peak_rss_change_bytes": -49152,
+        "p50_budget_breaches": 1
+      },
+      "1742_yield_active16": {
+        "client_count": 8,
+        "median_throughput_ratio": 0.9853,
+        "p50_breaches": 0,
+        "p95_breaches": 0
+      },
+      "1742_yield_active8": {
+        "client_count": 8,
+        "median_throughput_ratio": 0.9885,
+        "p50_breaches": 0,
+        "p95_breaches": 0
+      },
+      "1743_sql_ast_reuse": {
+        "http_p50_budget_breaches": 0,
+        "http_p95_budget_breaches": 0,
+        "parse_statement_p50_ms": 0.009833,
+        "plan_to_lazy_frame_p50_ms": 0.336125,
+        "parse_plan_execute_encode_total_p50_ms": 0.572208
+      }
+    }
+  }
+}

@@ -24,6 +24,7 @@ except ImportError:  # Windows exposes no getrusage module.
 
 from pyspark.sql.connect.session import SparkSession as ConnectSession
 
+from benchmark_lock import benchmark_lock
 from sparkless_connect import SparklessConnect
 
 
@@ -163,9 +164,9 @@ def measure_case(
     if server_pid is not None:
         assert server_metrics_start is not None
         server_metrics_end = server_process_metrics(server_pid)
-        measurement["server_cpu_ms_total"] = max(
-            0.0, server_metrics_end[0] - server_metrics_start[0]
-        ) * 1_000
+        measurement["server_cpu_ms_total"] = (
+            max(0.0, server_metrics_end[0] - server_metrics_start[0]) * 1_000
+        )
         measurement["server_rss_after_action_bytes_samples"] = server_rss_samples
         measurement["server_peak_rss_bytes_observed"] = max(
             [server_metrics_start[1], server_metrics_end[1], *server_rss_samples]
@@ -205,7 +206,9 @@ def validate_empty_arrow(table: Any) -> None:
         raise AssertionError("empty filter returned an incorrect Arrow result")
 
 
-def run_exports(spark: ConnectSession, iterations: int) -> list[dict[str, Any]]:
+def run_exports(
+    spark: ConnectSession, iterations: int, server_pid: int
+) -> list[dict[str, Any]]:
     measurements: list[dict[str, Any]] = []
     for rows in (1_000, 10_000, 100_000):
         frame = spark.range(rows)
@@ -215,6 +218,7 @@ def run_exports(spark: ConnectSession, iterations: int) -> list[dict[str, Any]]:
                 frame.collect,
                 exact_range_rows(rows),
                 iterations,
+                server_pid,
             )
         )
         measurements.append(
@@ -223,6 +227,7 @@ def run_exports(spark: ConnectSession, iterations: int) -> list[dict[str, Any]]:
                 frame.toArrow,
                 exact_arrow_range(rows),
                 iterations,
+                server_pid,
             )
         )
         projected = frame.select("id")
@@ -232,6 +237,7 @@ def run_exports(spark: ConnectSession, iterations: int) -> list[dict[str, Any]]:
                 projected.collect,
                 exact_range_rows(rows),
                 iterations,
+                server_pid,
             )
         )
         measurements.append(
@@ -240,6 +246,7 @@ def run_exports(spark: ConnectSession, iterations: int) -> list[dict[str, Any]]:
                 projected.toArrow,
                 exact_arrow_range(rows),
                 iterations,
+                server_pid,
             )
         )
 
@@ -250,6 +257,7 @@ def run_exports(spark: ConnectSession, iterations: int) -> list[dict[str, Any]]:
             limited_range.collect,
             exact_range_rows(1_000),
             iterations,
+            server_pid,
         )
     )
     measurements.append(
@@ -258,6 +266,7 @@ def run_exports(spark: ConnectSession, iterations: int) -> list[dict[str, Any]]:
             limited_range.toArrow,
             exact_arrow_range(1_000),
             iterations,
+            server_pid,
         )
     )
 
@@ -269,6 +278,7 @@ def run_exports(spark: ConnectSession, iterations: int) -> list[dict[str, Any]]:
                 frame.collect,
                 validate_empty_rows,
                 iterations,
+                server_pid,
             )
         )
         measurements.append(
@@ -277,6 +287,7 @@ def run_exports(spark: ConnectSession, iterations: int) -> list[dict[str, Any]]:
                 frame.toArrow,
                 validate_empty_arrow,
                 iterations,
+                server_pid,
             )
         )
 
@@ -315,6 +326,7 @@ def run_exports(spark: ConnectSession, iterations: int) -> list[dict[str, Any]]:
             collect_local_relation,
             validate_local_relation,
             iterations,
+            server_pid,
         )
     )
     measurements.append(
@@ -323,6 +335,7 @@ def run_exports(spark: ConnectSession, iterations: int) -> list[dict[str, Any]]:
             to_arrow_local_relation,
             validate_local_relation_arrow,
             iterations,
+            server_pid,
         )
     )
 
@@ -362,6 +375,7 @@ def run_exports(spark: ConnectSession, iterations: int) -> list[dict[str, Any]]:
             wide_frame.collect,
             validate_variable_width,
             iterations,
+            server_pid,
         )
     )
     measurements.append(
@@ -370,6 +384,7 @@ def run_exports(spark: ConnectSession, iterations: int) -> list[dict[str, Any]]:
             wide_frame.toArrow,
             validate_variable_width_arrow,
             iterations,
+            server_pid,
         )
     )
     return measurements
@@ -522,12 +537,16 @@ def run_small_jobs(
             interrupted_ids = spark._client.interrupt_all()
             cancel_rpc_ms = (time.perf_counter() - cancel_started) * 1_000
             if not interrupted_ids:
-                raise AssertionError("no active operation was returned for cancellation")
+                raise AssertionError(
+                    "no active operation was returned for cancellation"
+                )
             observe_started = time.perf_counter()
             deadline = time.monotonic() + 30
             while consumed < 10_000_000:
                 if time.monotonic() >= deadline:
-                    raise TimeoutError("interrupted stream did not terminate within 30s")
+                    raise TimeoutError(
+                        "interrupted stream did not terminate within 30s"
+                    )
                 try:
                     next(iterator)
                     consumed += 1
@@ -576,7 +595,9 @@ def run_small_jobs(
         server_pid,
     )
     cancellation_measurement["warmup_first_batch_and_cancel"] = cancellation_records[0]
-    cancellation_measurement["first_batch_and_cancel_samples"] = cancellation_records[1:]
+    cancellation_measurement["first_batch_and_cancel_samples"] = cancellation_records[
+        1:
+    ]
     for metric in (
         "first_batch_ms",
         "cancel_rpc_ms",
@@ -619,12 +640,24 @@ def main() -> None:
         action="store_true",
         help="run only the original range(100_000).select('id').collect() target",
     )
+    parser.add_argument(
+        "--projected-range-arrow-only",
+        action="store_true",
+        help="run only range(100_000).select('id').toArrow()",
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.iterations < 1 or args.startup_samples < 1:
         parser.error("--iterations and --startup-samples must be positive")
-    if args.small_jobs_only and args.projected_range_only:
-        parser.error("--small-jobs-only and --projected-range-only cannot be combined")
+    selected_workloads = sum(
+        (
+            args.small_jobs_only,
+            args.projected_range_only,
+            args.projected_range_arrow_only,
+        )
+    )
+    if selected_workloads > 1:
+        parser.error("focused workload options cannot be combined")
     server_bin = args.server_bin.absolute()
     if not server_bin.is_file():
         parser.error(f"server binary not found: {server_bin}")
@@ -664,12 +697,24 @@ def main() -> None:
                     projected_range.collect,
                     exact_range_rows(100_000),
                     args.iterations,
+                    owned_process.pid,
                 )
             ]
         elif args.small_jobs_only:
             measurements = run_small_jobs(spark, args.iterations, owned_process.pid)
+        elif args.projected_range_arrow_only:
+            projected_range = spark.range(100_000).select("id")
+            measurements = [
+                measure_case(
+                    "range_select_id_to_arrow_100000",
+                    projected_range.toArrow,
+                    exact_arrow_range(100_000),
+                    args.iterations,
+                    owned_process.pid,
+                )
+            ]
         else:
-            measurements = run_exports(spark, args.iterations)
+            measurements = run_exports(spark, args.iterations, owned_process.pid)
     startup_samples_ms = [startup_ms]
     startup_samples_ms.extend(
         measure_additional_startups(server_bin, args.startup_samples - 1)
@@ -733,4 +778,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    with benchmark_lock():
+        main()

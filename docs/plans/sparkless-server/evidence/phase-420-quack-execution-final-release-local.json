@@ -1,0 +1,242 @@
+{
+  "artifacts": {
+    "quack_extension": "/Volumes/T7/coding/robin-sparkless/python/server-duckdb/build/lib.macosx-26.0-arm64-cpython-311/sparkless_server_duckdb/quack.duckdb_extension",
+    "quack_extension_sha256": "ef547f01cb30412aa6dbade59bdd5254ed897ba4f113a1700e3e01e00a747935",
+    "quack_fixture_owner": "/Volumes/T7/coding/robin-sparkless/target/release/examples/duckdb_quack_fixture_owner",
+    "quack_fixture_owner_sha256": "448df3700db8a0a9b8d348064bee3da2811fb679e0a25d3542c35f4624bf105f",
+    "runner_sha256": "bfb1e88584d9c2377d28e834acd95191b1c503476c80619601679df7c181e488",
+    "server_binary": "/Volumes/T7/coding/robin-sparkless/target/release/sparkless-server-duckdb",
+    "server_sha256": "06286564b7b10890b6a6d98fad6cb8276beb8292431efcb8387f1f62f764ec6d"
+  },
+  "cases": {
+    "catalog_change_between_analysis_and_execution": {
+      "analyzed_schema": {
+        "fields": [
+          {
+            "metadata": {},
+            "name": "id",
+            "nullable": true,
+            "type": "integer"
+          },
+          {
+            "metadata": {},
+            "name": "label",
+            "nullable": true,
+            "type": "string"
+          }
+        ],
+        "type": "struct"
+      },
+      "rows_after_update": [
+        [
+          1,
+          "before-analysis"
+        ],
+        [
+          2,
+          "after-analysis"
+        ]
+      ]
+    },
+    "connect_write_visible_to_connect": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "connect_write_visible_to_independent_reader": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "existing_execution_connection_failure_while_stopped": "SparkException",
+    "fresh_query_after_owner_process_restart": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "fresh_query_after_owner_restart": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "independent_writer_visible_to_connect": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "infinite_date_rejected": "SparkException",
+    "infinite_timestamp_rejected": "SparkException",
+    "nested_type_rejected": "SparkException",
+    "new_independent_connection_rejected_while_owner_stopped": true,
+    "non_finite_double_rejected": "SparkException",
+    "quack_owner_loss_during_active_stream": {
+      "concurrent_reads_during_owner_loss": {
+        "client_count": 4,
+        "completed_before_or_during_loss": 0,
+        "failed_during_loss": 4,
+        "outcomes": [
+          {
+            "error": "user error: DuckDB execution Quack attach failed: IO Error: Failed to send message: IO Error: Could not connect to server error for HTTP POST to 'http://localhost:61121/quack'\n\nJVM stacktrace:\n",
+            "error_type": "SparkException"
+          },
+          {
+            "error": "user error: DuckDB execution failed: IO Error: Failed to send message: IO Error: Could not connect to server error for HTTP POST to 'http://localhost:61121/quack'\n\nJVM stacktrace:\n",
+            "error_type": "SparkException"
+          },
+          {
+            "error": "user error: DuckDB execution failed: IO Error: Failed to send message: IO Error: Could not connect to server error for HTTP POST to 'http://localhost:61121/quack'\n\nJVM stacktrace:\n",
+            "error_type": "SparkException"
+          },
+          {
+            "error": "user error: DuckDB execution failed: IO Error: Failed to send message: IO Error: Could not connect to server error for HTTP POST to 'http://localhost:61121/quack'\n\nJVM stacktrace:\n",
+            "error_type": "SparkException"
+          }
+        ]
+      },
+      "first_batch": {
+        "first_batch_ms": 4194.45624994114,
+        "operation_id": "f6260cb9-fe2b-4687-99ab-574cf4586681",
+        "rows": 2048
+      },
+      "fresh_connect_session_after_owner_recovery": false,
+      "health_while_owner_down": {
+        "status": "ready"
+      },
+      "owner_killed_during_active_stream": true,
+      "owner_restarted_with_same_identity": true,
+      "reader_exit_code": 0,
+      "reader_failure": "I1106 03:14:44.501697 44169380 ev_poll_posix.cc:588] FD from fork parent still in poll list: fd(12, generation: 1)\n",
+      "reader_result": {
+        "elapsed_seconds": 56.55361141706817,
+        "first_batch_ms": 4194.45624994114,
+        "operation_id": "f6260cb9-fe2b-4687-99ab-574cf4586681",
+        "pause_ms_per_response": 100.0,
+        "reattachable": true,
+        "release_rpcs": 490,
+        "responses": 489,
+        "rows": 1000000
+      },
+      "rows_after_owner_recovery": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "rows_from_independent_client_after_owner_recovery": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "same_session_recovery_error": null,
+      "same_session_retry_error": null,
+      "same_session_retry_succeeded": false,
+      "stream_outcome": "completed_after_owner_loss",
+      "stream_rows": 1000000
+    },
+    "quack_query_cancellation": {
+      "cancelled": true,
+      "error_type": "SparkException",
+      "interrupted_operation_count": 1,
+      "post_cancel_control_count": 3
+    },
+    "quack_receipt_replay_after_both_process_restarts": {
+      "changed_request_under_same_identity_rejected": true,
+      "durable_receipt_before_retry": true,
+      "identity_replayed_on_new_instance": true,
+      "owner_process_ids": [
+        17989,
+        17995
+      ],
+      "receipt_key": "connect-operation:7c1a82d7fb7b8106625c945a3f87cf166b9566268bd520294cafad368b1469be",
+      "receipt_unchanged_after_conflict": true,
+      "receipt_unchanged_after_retry": true,
+      "request_fingerprint": "0cb9bb4f2fe82cb9b71fb89c09e050f9cbd5f6ecd4421dc2117512959b70789d",
+      "retry_result_complete_received": true,
+      "rows_after_retry": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "rows_before_retry": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "rows_unchanged_after_conflict": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "server_instance_ids": [
+        "6f79e1f2-13ad-45cb-9eb2-2ba5224c452b",
+        "a8e02165-a613-4daa-93d7-285e3988c221",
+        "ffa0c299-8a3b-4b9d-ac50-d41379ddb30a"
+      ]
+    },
+    "query_failed_during_owner_process_loss": "SparkException",
+    "range_execution_control": 3,
+    "reattached_connect_write_committed_once": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "write_after_owner_process_restart_visible_to_reader": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ]
+  },
+  "duckdb_execution_witness_count": 1,
+  "environment": {
+    "platform": "macOS-26.5.2-arm64-arm-64bit",
+    "pyspark_client": "4.0.5",
+    "python": "3.11.15"
+  },
+  "format_version": 1,
+  "limitations": [
+    "This is a local source-binary probe on one host, not a cross-platform or release-artifact check.",
+    "The Quack process-restart replay uses a file-backed local fixture owner and does not inject a failure at the transaction commit boundary."
+  ],
+  "owner_mode": "shared Quack service; separate fixture and server processes",
+  "timestamp_utc": "2026-11-06T08:15:43.787315+00:00"
+}

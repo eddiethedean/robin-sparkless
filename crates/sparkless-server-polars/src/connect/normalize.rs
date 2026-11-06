@@ -325,89 +325,6 @@ pub(super) fn materialize_plan(plan: &ConnectExecutionPlan) -> proto::Plan {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn sql_command(query: &str) -> proto::Plan {
-        proto::Plan {
-            op_type: Some(proto::plan::OpType::Command(proto::Command {
-                command_type: Some(proto::command::CommandType::SqlCommand(proto::SqlCommand {
-                    input: Some(proto::Relation {
-                        rel_type: Some(proto::relation::RelType::Sql(proto::Sql {
-                            query: query.into(),
-                            ..Default::default()
-                        })),
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                })),
-            })),
-        }
-    }
-
-    #[test]
-    fn current_client_sql_command_input_routes_reads_and_writes_by_effect() {
-        let read = normalize_plan(&sql_command("SELECT 7 AS value")).unwrap();
-        assert!(matches!(
-            read,
-            ConnectExecutionPlan::Command(ConnectCommand::SqlQuery { ref sql })
-                if sql == "SELECT 7 AS value"
-        ));
-
-        let write = normalize_plan(&sql_command("CREATE TABLE items (id BIGINT)")).unwrap();
-        assert!(matches!(
-            write,
-            ConnectExecutionPlan::Command(ConnectCommand::Sql { ref sql })
-                if sql == "CREATE TABLE items (id BIGINT)"
-        ));
-    }
-
-    #[test]
-    fn sql_command_rejects_parameterized_and_non_sql_inputs() {
-        let mut parameterized = sql_command("SELECT ?");
-        let Some(proto::plan::OpType::Command(command)) = parameterized.op_type.as_mut() else {
-            unreachable!()
-        };
-        let Some(proto::command::CommandType::SqlCommand(sql)) = command.command_type.as_mut()
-        else {
-            unreachable!()
-        };
-        let Some(input) = sql.input.as_mut() else {
-            unreachable!()
-        };
-        let Some(proto::relation::RelType::Sql(query)) = input.rel_type.as_mut() else {
-            unreachable!()
-        };
-        query.pos_arguments.push(proto::Expression::default());
-        assert!(matches!(
-            normalize_plan(&parameterized).unwrap(),
-            ConnectExecutionPlan::Command(ConnectCommand::Unsupported(_))
-        ));
-
-        let mut unrelated_input = sql_command("SELECT 7");
-        let Some(proto::plan::OpType::Command(command)) = unrelated_input.op_type.as_mut() else {
-            unreachable!()
-        };
-        let Some(proto::command::CommandType::SqlCommand(sql)) = command.command_type.as_mut()
-        else {
-            unreachable!()
-        };
-        sql.input = Some(proto::Relation {
-            rel_type: Some(proto::relation::RelType::Range(proto::Range {
-                end: 1,
-                step: 1,
-                ..Default::default()
-            })),
-            ..Default::default()
-        });
-        assert!(matches!(
-            normalize_plan(&unrelated_input).unwrap(),
-            ConnectExecutionPlan::Command(ConnectCommand::Unsupported(_))
-        ));
-    }
-}
-
 pub(super) fn materialize_relation(relation: &ConnectRelation) -> proto::Relation {
     use proto::relation::RelType;
 
@@ -628,5 +545,88 @@ fn group_type_value(group_type: ConnectGroupType) -> i32 {
     match group_type {
         ConnectGroupType::GroupBy => proto::aggregate::GroupType::Groupby as i32,
         ConnectGroupType::Other(value) => value,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sql_command(query: &str) -> proto::Plan {
+        proto::Plan {
+            op_type: Some(proto::plan::OpType::Command(proto::Command {
+                command_type: Some(proto::command::CommandType::SqlCommand(proto::SqlCommand {
+                    input: Some(proto::Relation {
+                        rel_type: Some(proto::relation::RelType::Sql(proto::Sql {
+                            query: query.into(),
+                            ..Default::default()
+                        })),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                })),
+            })),
+        }
+    }
+
+    #[test]
+    fn current_client_sql_command_input_routes_reads_and_writes_by_effect() {
+        let read = normalize_plan(&sql_command("SELECT 7 AS value")).unwrap();
+        assert!(matches!(
+            read,
+            ConnectExecutionPlan::Command(ConnectCommand::SqlQuery { ref sql })
+                if sql == "SELECT 7 AS value"
+        ));
+
+        let write = normalize_plan(&sql_command("CREATE TABLE items (id BIGINT)")).unwrap();
+        assert!(matches!(
+            write,
+            ConnectExecutionPlan::Command(ConnectCommand::Sql { ref sql })
+                if sql == "CREATE TABLE items (id BIGINT)"
+        ));
+    }
+
+    #[test]
+    fn sql_command_rejects_parameterized_and_non_sql_inputs() {
+        let mut parameterized = sql_command("SELECT ?");
+        let Some(proto::plan::OpType::Command(command)) = parameterized.op_type.as_mut() else {
+            unreachable!()
+        };
+        let Some(proto::command::CommandType::SqlCommand(sql)) = command.command_type.as_mut()
+        else {
+            unreachable!()
+        };
+        let Some(input) = sql.input.as_mut() else {
+            unreachable!()
+        };
+        let Some(proto::relation::RelType::Sql(query)) = input.rel_type.as_mut() else {
+            unreachable!()
+        };
+        query.pos_arguments.push(proto::Expression::default());
+        assert!(matches!(
+            normalize_plan(&parameterized).unwrap(),
+            ConnectExecutionPlan::Command(ConnectCommand::Unsupported(_))
+        ));
+
+        let mut unrelated_input = sql_command("SELECT 7");
+        let Some(proto::plan::OpType::Command(command)) = unrelated_input.op_type.as_mut() else {
+            unreachable!()
+        };
+        let Some(proto::command::CommandType::SqlCommand(sql)) = command.command_type.as_mut()
+        else {
+            unreachable!()
+        };
+        sql.input = Some(proto::Relation {
+            rel_type: Some(proto::relation::RelType::Range(proto::Range {
+                end: 1,
+                step: 1,
+                ..Default::default()
+            })),
+            ..Default::default()
+        });
+        assert!(matches!(
+            normalize_plan(&unrelated_input).unwrap(),
+            ConnectExecutionPlan::Command(ConnectCommand::Unsupported(_))
+        ));
     }
 }

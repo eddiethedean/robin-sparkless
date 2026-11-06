@@ -62,7 +62,8 @@ This policy supersedes the earlier exception allowing `spark-sql-parser` to rema
 | **4.28** | **4.28.0** | 12 | `sparkless-connect35`: separate Spark 3.5 server compatibility profile and package |
 | **4.29** | **4.29.0** | 13 | `sparkless-connect41`: Spark 4.1 server feature deltas, profile and package |
 | **4.30** | **4.30.0** | 14 | `sparkless-connect42`: Spark 4.2 server feature deltas, profile and package |
-| **4.31+** | **4.N.0** for release 4.N | Follow-on scope to be defined | Further conformance and measured performance improvements |
+| **4.31** | **4.31.0** | 15, optional capability | Native Apache Hudi batch reads and writes, cloud storage, table services, and Structured Streaming sources and sinks |
+| **4.32+** | **4.N.0** for release 4.N | Follow-on scope to be defined | Further conformance and measured performance improvements |
 
 All rows are planned. Release scope is cumulative: each release retains and regression-tests previously shipped capabilities. Later scope cannot bypass an unfinished prerequisite. If an optional phase is deferred or reordered, explicitly revise this release map and its gates before assigning different work to that version. The two DuckDB phases are explicitly sequenced after supported Connect: source integration first, execution backend second. Python workers and Delta/UC move to Phases 5/6; neither has an inherent technical dependency on DuckDB, and Delta/UC does not require Python workers. Reordering requires an explicit roadmap revision, not an incidental dependency in the implementation.
 
@@ -237,6 +238,42 @@ Primary plan: [SS-15: DuckDB Connect backend](15-duckdb-connect-backend.md). [De
 
 Build on the separate DuckDB product and neutral server boundaries delivered under 4.19 SS-23/D22. Do not create another server/launcher stack or infer execution support from the already shipped source-enabled product name. D15 still owns actual DuckDB execution semantics and lifecycle proof.
 
+### Local non-CI progress (2026-11-06)
+
+The source implementation for 420-01–420-04 and 420-06–420-11 is present and
+has local macOS arm64 evidence; 420-05's integrated HTTP/export/scheduler
+comparisons and isolated #1739–#1743 attribution are recorded. The
+public Spark 4.0.5 differential matches 44
+result/schema cases, rejects 20 unsupported forms, and records 51 DuckDB query
+witnesses and six committed-write witnesses. Local Rust tests pass (19 DuckDB
+owner tests and 101 server tests), including cancelled-waiter and invalidated-
+connection cleanup. The [final HTTP comparison](evidence/phase-420-http-benchmarks-final-release-local.json)
+against 4.19.0 records three rotating pairs with no p50/p95 budget breaches on
+the current base-server binary. The focused Python suite passes 157 tests,
+and strict Clippy, Ruff, formatting, and diff checks pass.
+
+The final 8-client/active-16 local and Quack V38 cohorts completed concurrent
+and final paced one-million-row reads without capacity rejections. A bounded
+query pool reduced Quack small-count p99 from 27.75 seconds to 167 ms while
+raising throughput from 12.4 to 79.2 ops/s. Local base-server and DuckDB-server
+wheels passed isolated macOS install checks; the DuckDB wheel's bundled server
+passed the public execution smoke, and the current `sparkless-testing` wheel
+passed an import check with PySpark imports blocked. These wheels still carry
+4.19.0 metadata. A backend-specific shutdown smoke cancelled a live Quack-backed
+Connect query, observed no remaining active owner query, and recorded clean
+server and owner exits. Per-change reports are linked from [SS-15](15-duckdb-connect-backend.md#isolated-performance-attribution).
+See the [local release summary](evidence/phase-420-release-profile-local-summary.json),
+[read-pool report](evidence/phase-420-duckdb-v38-read-pool-local-summary.json),
+and [package smoke report](evidence/phase-420-local-package-smokes.json).
+
+These results do not set the supported production capacity or latency/RSS
+budgets. One near-limit p50 pair for #1739 and one Arrow payload-sharing p50
+pair exceeded the per-pair guardrail; neither result repeated across its paired
+run set. Exact 4.20.0 packages and inventory, Linux/container checks, a broader
+supported-platform matrix, other partial-I/O recovery cases, the full owner and
+stream cleanup matrix, capacity-budget acceptance, and release-stage CI/public
+verification remain release gates.
+
 - Freeze **D15**: backend selection/interfaces, Spark semantic translation, supported SQL/plans/configuration, analysis/result schemas, transactional outcomes, restart behavior, and resource accounting.
 - Reuse the supported Connect transport/session/replay infrastructure; prove it against the DuckDB backend independently of Polars.
 - Translate supported Spark semantics deliberately. DuckDB SQL acceptance alone does not establish Spark compatibility, and unsupported operations never silently select another engine.
@@ -326,6 +363,15 @@ Complete **Phase 10 / [SS-19](19-structured-streaming.md)** using the enabled AP
 Follow [SS-21: versioned compatibility packages](21-versioned-connect-packages.md). Complete all planned server features in Phases 3–10, including SS-22 LSQL-06 and V56–V58 for the complete existing local feature baseline, before Phase 11 certifies `sparkless-connect40` at 4.27.0. Then deliver one phase each for `sparkless-connect35` (Phase 12 / 4.28), `sparkless-connect41` (Phase 13 / 4.29), and `sparkless-connect42` (Phase 14 / 4.30). The owner confirmed 3.5, 4.0, 4.1 and 4.2 as the upstream targets; 3.6–3.9 are not released Spark lines.
 
 Each package pins a tested upstream client patch and the exact matching Sparkless launcher/native binary, selecting an explicit server semantic/protocol profile. Complete the applicable feature matrix and differential/fault tests before certification. Shared code and earlier profiles must retain their behavior. Resolve **D20** for each line, then pass **V48/V49**, **V50/V51**, **V52/V53**, and **V54/V55**, respectively, including coordinated candidate and fresh public installs. Optional workers/backends/connectors stay opt-in; universal Apache Spark parity remains outside scope.
+
+## 4.31.0 — Optional Apache Hudi table support
+
+Target **Phase 15 / [SS-24](24-optional-hudi-table-support.md)**. Use `hudi-rs` for Hudi reads and writes in local Sparkless and through configured tables on the Polars server. Deliver snapshots first, then time travel, incremental and read-optimized reads, the expanded table version and layout matrix, cloud storage and credentials, transactional writes and table services, and Hudi Structured Streaming sources and sinks. Build streaming on the recovery and micro-batch contracts from Phases 9 and 10. Register the local I/O surface and its server mapping together under SS-22's baseline drift policy.
+
+- [ ] Freeze **D23** for the upstream pin, read and write matrix, snapshot identity, cloud credentials, commit and checkpoint recovery, Arrow conversion, resource limits, and opt-in packaging.
+- [ ] Pass **V60** for all declared batch read modes against pinned Spark/Hudi fixtures, and **V61** for lifecycle, resource limits, feature isolation, and candidate/public artifacts.
+- [ ] Pass **V62** for S3, Azure Blob Storage, and Google Cloud Storage. Pass **V63** for transactional writes, native table services, and Spark interoperability.
+- [ ] Pass **V64** for checkpointed Hudi sources and sinks, including recovery at the Hudi commit and checkpoint boundaries. All five gates apply to 4.31.
 
 ## Publication checklist for every release
 

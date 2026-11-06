@@ -228,6 +228,22 @@ impl CatalogReadSnapshot for DuckDbReadSnapshot {
 pub(crate) fn validate_batch_scalars(
     batch: &duckdb::arrow::record_batch::RecordBatch,
 ) -> Result<(), EngineError> {
+    validate_batch_scalars_with_string_limit(batch, Some(512 * 1024))
+}
+
+/// Validate values that cannot be represented safely in the Spark Connect scalar result set.
+/// Execution results use the batch IPC limit for string sizes; source scans retain their smaller
+/// per-string cap through [`validate_batch_scalars`].
+pub(crate) fn validate_execution_batch_scalars(
+    batch: &duckdb::arrow::record_batch::RecordBatch,
+) -> Result<(), EngineError> {
+    validate_batch_scalars_with_string_limit(batch, None)
+}
+
+fn validate_batch_scalars_with_string_limit(
+    batch: &duckdb::arrow::record_batch::RecordBatch,
+    max_string_bytes: Option<usize>,
+) -> Result<(), EngineError> {
     use arrow60::array::{
         Array, Date32Array, Float64Array, StringArray, TimestampMicrosecondArray,
     };
@@ -298,22 +314,24 @@ pub(crate) fn validate_batch_scalars(
                 }
             }
             arrow60::datatypes::DataType::Utf8 => {
-                let values = array
-                    .as_any()
-                    .downcast_ref::<StringArray>()
-                    .ok_or_else(|| {
-                        EngineError::invalid_input(format!(
-                            "DuckDB VARCHAR column {:?} has an unexpected Arrow representation",
+                if let Some(max_string_bytes) = max_string_bytes {
+                    let values = array
+                        .as_any()
+                        .downcast_ref::<StringArray>()
+                        .ok_or_else(|| {
+                            EngineError::invalid_input(format!(
+                                "DuckDB VARCHAR column {:?} has an unexpected Arrow representation",
+                                field.name()
+                            ))
+                        })?;
+                    if (0..values.len()).any(|index| {
+                        !values.is_null(index) && values.value(index).len() > max_string_bytes
+                    }) {
+                        return Err(EngineError::invalid_input(format!(
+                            "DuckDB VARCHAR column {:?} contains a value larger than 512 KiB",
                             field.name()
-                        ))
-                    })?;
-                if (0..values.len())
-                    .any(|index| !values.is_null(index) && values.value(index).len() > 512 * 1024)
-                {
-                    return Err(EngineError::invalid_input(format!(
-                        "DuckDB VARCHAR column {:?} contains a value larger than 512 KiB",
-                        field.name()
-                    )));
+                        )));
+                    }
                 }
             }
             _ => {}

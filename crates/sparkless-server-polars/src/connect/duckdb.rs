@@ -6,7 +6,9 @@ use crate::connect::{
 };
 use robin_sparkless_core::engine::{ArrowIpcBatchStream, ArrowIpcStream, CancellationToken};
 use robin_sparkless_core::{DataType, EngineError, LogicalField, StructType};
-use robin_sparkless_duckdb::{DUCKDB_EXECUTION_MAX_BATCH_BYTES, DUCKDB_EXECUTION_MAX_BATCH_ROWS};
+use robin_sparkless_duckdb::{
+    ArrowIpcQueryOptions, DUCKDB_EXECUTION_MAX_BATCH_BYTES, DUCKDB_EXECUTION_MAX_BATCH_ROWS,
+};
 use robin_sparkless_sql::{
     ExpressionShape, FromPlan, GroupByPlan, JoinConstraintPlan, JoinKind, Projection, RelationPlan,
     RelationalNode, SelectPlan, SqlExpression, SqlQueryPlan, StatementPlan,
@@ -69,13 +71,15 @@ impl ConnectExecutionPort for DuckDbConnectExecution {
                 let sql = format!("SELECT * FROM {}", renderer.relation(relation, 1)?);
                 stream_query(
                     session,
-                    sql,
-                    renderer.local_inputs,
-                    renderer.local_input_schemas,
+                    PreparedConnectQuery {
+                        sql,
+                        local_inputs: renderer.local_inputs,
+                        expected_input_schemas: renderer.local_input_schemas,
+                        expected_schema,
+                    },
                     request.max_batch_rows,
                     request.max_response_bytes,
                     request.cancellation,
-                    expected_schema,
                 )
             }
             ConnectExecutionPlan::Missing => Err(failure(
@@ -109,16 +113,18 @@ pub(super) fn describe_connect_plan(
         let worker_cancellation = cancellation.clone();
         thread::spawn(move || {
             if let Err(error) = owner.stream_query_with_arrow_ipc(
-                &sql,
-                &inputs,
-                &expected_input_schemas,
-                None,
-                MAX_CONNECT_LOCAL_IPC_BYTES,
-                MAX_CONNECT_LOCAL_ROWS,
-                MAX_CONNECT_LOCAL_DECODED_BYTES,
-                &worker_cancellation,
-                DUCKDB_EXECUTION_MAX_BATCH_ROWS,
-                DUCKDB_EXECUTION_MAX_BATCH_BYTES,
+                ArrowIpcQueryOptions {
+                    sql: &sql,
+                    inputs: &inputs,
+                    expected_input_schemas: &expected_input_schemas,
+                    expected_output_schema: None,
+                    max_input_bytes: MAX_CONNECT_LOCAL_IPC_BYTES,
+                    max_input_rows: MAX_CONNECT_LOCAL_ROWS,
+                    max_input_decoded_bytes: MAX_CONNECT_LOCAL_DECODED_BYTES,
+                    token: &worker_cancellation,
+                    max_batch_rows: DUCKDB_EXECUTION_MAX_BATCH_ROWS,
+                    max_batch_bytes: DUCKDB_EXECUTION_MAX_BATCH_BYTES,
+                },
                 |schema| send_event(&sender, DuckDbEvent::Schema(schema)),
                 |_| {
                     Err(EngineError::internal(
@@ -211,6 +217,9 @@ fn normalize_connect_schema(
             actual,
             cancellation,
         ),
+        ConnectRelationKind::Sql { query, .. } => {
+            normalize_sql_output_schema(session, query, actual, cancellation)
+        }
         ConnectRelationKind::Project { input: None, .. }
         | ConnectRelationKind::Aggregate { input: None, .. } => Err(failure(
             "CONNECT_RELATION_INPUT_REQUIRED",
@@ -493,7 +502,7 @@ fn projection_output_name(expression: &ConnectExpression, fallback: &str) -> Opt
     }
 }
 
-fn source_field_for_expression<'a>(
+fn source_field_for_expression(
     expression: &ConnectExpression,
     source_schema: &StructType,
     plan_fields: Option<&HashMap<i64, Vec<LogicalField>>>,
@@ -507,9 +516,7 @@ fn source_field_for_expression<'a>(
         let field = matches.next()?;
         return matches.next().is_none().then(|| field.clone());
     }
-    let Some((_, identifier)) = projection_attribute(expression) else {
-        return None;
-    };
+    let (_, identifier) = projection_attribute(expression)?;
     let mut matches = source_schema
         .logical_fields()
         .iter()
@@ -542,6 +549,11 @@ fn expression_nullability(
                 "isnull" | "isnotnull" | "count"
             ) {
                 return Some(false);
+            }
+            if matches!(name.as_str(), "/" | "%") {
+                // Spark marks division and remainder nullable because their denominator may be
+                // zero, even when the current input schema is non-nullable.
+                return Some(true);
             }
             let nullabilities = arguments
                 .iter()
@@ -576,11 +588,23 @@ fn sql_expression_nullability(
         ExpressionShape::Unary { expression, .. } => {
             sql_expression_nullability(expression, source_schema)
         }
-        ExpressionShape::Binary { left, right, .. } => Some(
-            sql_expression_nullability(left, source_schema)?
-                || sql_expression_nullability(right, source_schema)?,
-        ),
+        ExpressionShape::Binary {
+            operator,
+            left,
+            right,
+        } => {
+            if matches!(operator.as_str(), "/" | "%") {
+                Some(true)
+            } else {
+                Some(
+                    sql_expression_nullability(left, source_schema)?
+                        || sql_expression_nullability(right, source_schema)?,
+                )
+            }
+        }
         ExpressionShape::Function { name, .. } if name.eq_ignore_ascii_case("count") => Some(false),
+        // SUM can return NULL for empty input even when its argument is non-nullable.
+        ExpressionShape::Function { name, .. } if name.eq_ignore_ascii_case("sum") => Some(true),
         ExpressionShape::Function { arguments, .. } => Some(
             arguments
                 .iter()
@@ -591,6 +615,76 @@ fn sql_expression_nullability(
         ),
         ExpressionShape::Composite => None,
     }
+}
+
+fn normalize_sql_output_schema(
+    session: &DuckDbConnectSession,
+    source_sql: &str,
+    actual: StructType,
+    cancellation: &CancellationToken,
+) -> Result<StructType, ExecutionError> {
+    let statement = robin_sparkless_sql::parse_statement(source_sql)
+        .map_err(|error| failure("CONNECT_SQL_INVALID", &error.to_string()))?;
+    let StatementPlan::Query(query) = robin_sparkless_sql::lower_statement(&statement)
+        .map_err(|error| failure("CONNECT_SQL_UNSUPPORTED", &error.to_string()))?
+    else {
+        return Err(failure(
+            "CONNECT_SQL_UNSUPPORTED",
+            "SQL relations require one read-only SELECT",
+        ));
+    };
+    let RelationalNode::Select(select) = query.body else {
+        return Err(failure(
+            "CONNECT_SQL_UNSUPPORTED",
+            "SQL relations require one SELECT body",
+        ));
+    };
+    if select.projection.len() != actual.logical_fields().len()
+        || select.projection.iter().any(|projection| {
+            matches!(
+                projection,
+                Projection::Wildcard | Projection::QualifiedWildcard(_)
+            )
+        })
+    {
+        // Wildcards inherit their physical names and nullability from DuckDB's source schema.
+        return Ok(actual);
+    }
+
+    let source_schema = if let Some(from) = select.from.first() {
+        let mut renderer = PlanRenderer {
+            session,
+            cancellation: cancellation.clone(),
+            local_inputs: Vec::new(),
+            local_input_schemas: Vec::new(),
+        };
+        let from = renderer.sql_from(from)?;
+        session
+            .owner
+            .describe_query(&format!("SELECT * FROM {from}"), cancellation)
+            .map_err(engine_failure)?
+    } else {
+        StructType::from_logical_fields(Vec::new())
+    };
+    let mut fields = actual.logical_fields().to_vec();
+    for (field, projection) in fields.iter_mut().zip(select.projection) {
+        let Projection::Expression { expression, alias } = projection else {
+            continue;
+        };
+        if let Some(alias) = alias {
+            field.name = alias;
+        } else if let ExpressionShape::Identifier(parts) = &expression.shape
+            && let Some(name) = parts.last()
+        {
+            // Spark preserves the requested identifier spelling in SQL result schemas even
+            // though catalog lookup itself is case-insensitive.
+            field.name = name.clone();
+        }
+        if let Some(nullable) = sql_expression_nullability(&expression, &source_schema) {
+            field.nullable = nullable;
+        }
+    }
+    Ok(StructType::from_logical_fields(fields))
 }
 
 fn expression_string_plan(expression: &str) -> Option<(SqlExpression, Option<String>)> {
@@ -916,15 +1010,19 @@ fn describe_plan(
     })
 }
 
-fn stream_query(
-    session: &DuckDbConnectSession,
+struct PreparedConnectQuery {
     sql: String,
     local_inputs: Vec<Vec<u8>>,
     expected_input_schemas: Vec<Option<StructType>>,
+    expected_schema: StructType,
+}
+
+fn stream_query(
+    session: &DuckDbConnectSession,
+    query: PreparedConnectQuery,
     max_batch_rows: usize,
     max_response_bytes: usize,
     cancellation: CancellationToken,
-    expected_schema: StructType,
 ) -> Result<ConnectExecutionResult, ExecutionError> {
     let max_rows = max_batch_rows.min(DUCKDB_EXECUTION_MAX_BATCH_ROWS);
     let max_bytes = max_response_bytes
@@ -938,21 +1036,26 @@ fn stream_query(
     }
     let (sender, receiver) = mpsc::sync_channel(1);
     let owner = session.owner.clone();
-    let worker_sql = sql;
+    let worker_sql = query.sql;
+    let local_inputs = query.local_inputs;
+    let expected_input_schemas = query.expected_input_schemas;
+    let expected_schema = query.expected_schema;
     let worker_token = cancellation.clone();
     let worker_output_schema = expected_schema.clone();
     thread::spawn(move || {
         let result = owner.stream_query_with_arrow_ipc(
-            &worker_sql,
-            &local_inputs,
-            &expected_input_schemas,
-            Some(&worker_output_schema),
-            MAX_CONNECT_LOCAL_IPC_BYTES,
-            MAX_CONNECT_LOCAL_ROWS,
-            MAX_CONNECT_LOCAL_DECODED_BYTES,
-            &worker_token,
-            max_rows,
-            max_bytes,
+            ArrowIpcQueryOptions {
+                sql: &worker_sql,
+                inputs: &local_inputs,
+                expected_input_schemas: &expected_input_schemas,
+                expected_output_schema: Some(&worker_output_schema),
+                max_input_bytes: MAX_CONNECT_LOCAL_IPC_BYTES,
+                max_input_rows: MAX_CONNECT_LOCAL_ROWS,
+                max_input_decoded_bytes: MAX_CONNECT_LOCAL_DECODED_BYTES,
+                token: &worker_token,
+                max_batch_rows: max_rows,
+                max_batch_bytes: max_bytes,
+            },
             |schema| send_event(&sender, DuckDbEvent::Schema(schema)),
             |batch| send_event(&sender, DuckDbEvent::Batch(batch)),
         );
@@ -1130,7 +1233,7 @@ impl<'a> PlanRenderer<'a> {
                 self.session
                     .owner
                     .table_reference(&table.identifier)
-                    .map(|reference| format!("{reference}"))
+                    .map(|reference| reference.to_string())
                     .map_err(engine_failure)
             }
             ConnectRelationKind::Alias {
@@ -1464,16 +1567,35 @@ impl<'a> PlanRenderer<'a> {
                 "SQL supports non-distinct single-source SELECTs without HAVING",
             ));
         }
+        let from = select
+            .from
+            .first()
+            .map(|from| self.sql_from(from))
+            .transpose()?;
+        let source_schema = if select.projection.iter().any(sql_projection_has_sum) {
+            if let Some(from) = from.as_deref() {
+                Some(
+                    self.session
+                        .owner
+                        .describe_query(&format!("SELECT * FROM {from}"), &self.cancellation)
+                        .map_err(engine_failure)?,
+                )
+            } else {
+                Some(StructType::from_logical_fields(Vec::new()))
+            }
+        } else {
+            None
+        };
         let projection = select
             .projection
             .iter()
-            .map(|projection| self.sql_projection(projection))
+            .map(|projection| self.sql_projection(projection, source_schema.as_ref()))
             .collect::<Result<Vec<_>, _>>()?
             .join(", ");
         let mut sql = format!("SELECT {projection}");
-        if let Some(from) = select.from.first() {
+        if let Some(from) = from {
             sql.push_str(" FROM ");
-            sql.push_str(&self.sql_from(from)?);
+            sql.push_str(&from);
         }
         if let Some(filter) = &select.filter {
             sql.push_str(" WHERE ");
@@ -1507,7 +1629,11 @@ impl<'a> PlanRenderer<'a> {
         Ok(sql)
     }
 
-    fn sql_projection(&mut self, projection: &Projection) -> Result<String, ExecutionError> {
+    fn sql_projection(
+        &mut self,
+        projection: &Projection,
+        source_schema: Option<&StructType>,
+    ) -> Result<String, ExecutionError> {
         match projection {
             Projection::Wildcard => Ok("*".into()),
             Projection::QualifiedWildcard(qualifier) => {
@@ -1523,7 +1649,62 @@ impl<'a> PlanRenderer<'a> {
                 ))
             }
             Projection::Expression { expression, alias } => {
-                let expression = render_sql_expression(expression)?;
+                let expression = if let ExpressionShape::Function {
+                    name, arguments, ..
+                } = &expression.shape
+                    && name.eq_ignore_ascii_case("sum")
+                {
+                    let argument = arguments.first().ok_or_else(|| {
+                        failure("CONNECT_SQL_FUNCTION_ARITY", "SUM requires one argument")
+                    })?;
+                    if arguments.len() != 1 {
+                        return Err(failure(
+                            "CONNECT_SQL_FUNCTION_ARITY",
+                            "SUM requires one argument",
+                        ));
+                    }
+                    let ExpressionShape::Identifier(parts) = &argument.shape else {
+                        return Err(failure(
+                            "CONNECT_SQL_AGGREGATE_TYPE_UNSUPPORTED",
+                            "SQL SUM requires a supported numeric input column",
+                        ));
+                    };
+                    let source_name = parts.last().ok_or_else(|| {
+                        failure(
+                            "CONNECT_SQL_AGGREGATE_TYPE_UNSUPPORTED",
+                            "SQL SUM requires a supported numeric input column",
+                        )
+                    })?;
+                    let source_schema = source_schema.ok_or_else(|| {
+                        failure(
+                            "CONNECT_SQL_AGGREGATE_TYPE_UNSUPPORTED",
+                            "SQL SUM requires a supported numeric input column",
+                        )
+                    })?;
+                    let mut matches = source_schema
+                        .logical_fields()
+                        .iter()
+                        .filter(|field| field.name.eq_ignore_ascii_case(source_name));
+                    let source = matches.next().ok_or_else(|| {
+                        failure(
+                            "CONNECT_SQL_AGGREGATE_TYPE_UNSUPPORTED",
+                            "SQL SUM input column cannot be resolved",
+                        )
+                    })?;
+                    if matches.next().is_some() {
+                        return Err(failure(
+                            "CONNECT_SQL_AGGREGATE_TYPE_UNSUPPORTED",
+                            "SQL SUM input column is ambiguous",
+                        ));
+                    }
+                    let (_, sql_type) = spark_sum_type(&source.data_type)?;
+                    format!(
+                        "CAST(SUM({}) AS {sql_type})",
+                        render_sql_expression(argument)?
+                    )
+                } else {
+                    render_sql_expression(expression)?
+                };
                 Ok(match alias {
                     Some(alias) => format!(
                         "{expression} AS {}",
@@ -1618,6 +1799,14 @@ impl<'a> PlanRenderer<'a> {
             )),
         }
     }
+}
+
+fn sql_projection_has_sum(projection: &Projection) -> bool {
+    matches!(
+        projection,
+        Projection::Expression { expression, .. }
+            if matches!(&expression.shape, ExpressionShape::Function { name, .. } if name.eq_ignore_ascii_case("sum"))
+    )
 }
 
 fn validate_sql_query_shape(sql: &str) -> Result<(), ExecutionError> {
@@ -2534,7 +2723,9 @@ fn render_literal(literal: &ConnectLiteral) -> Result<String, ExecutionError> {
         ConnectLiteral::Integer(value) => value.to_string(),
         ConnectLiteral::Long(value) => value.to_string(),
         ConnectLiteral::Boolean(value) => value.to_string(),
-        ConnectLiteral::Double(value) if value.is_finite() => value.to_string(),
+        ConnectLiteral::Double(value) if value.is_finite() => {
+            format!("CAST({value} AS DOUBLE)")
+        }
         ConnectLiteral::Double(_) => {
             return Err(failure(
                 "CONNECT_LITERAL_INVALID",
@@ -2695,13 +2886,13 @@ fn collect_plan_ids(
             "Connect relation depth exceeds its limit",
         ));
     }
-    if let Some(plan_id) = relation.plan_id {
-        if !plan_ids.insert(plan_id) {
-            return Err(failure(
-                "CONNECT_PLAN_ID_DUPLICATE",
-                "Connect relation plan IDs must be unique within a request",
-            ));
-        }
+    if let Some(plan_id) = relation.plan_id
+        && !plan_ids.insert(plan_id)
+    {
+        return Err(failure(
+            "CONNECT_PLAN_ID_DUPLICATE",
+            "Connect relation plan IDs must be unique within a request",
+        ));
     }
     let mut visit = |child: Option<&Box<ConnectRelation>>| {
         child
@@ -2809,11 +3000,7 @@ fn is_connect_aggregate(expression: &ConnectExpression) -> bool {
                 && !is_user_defined
                 && !is_internal
                 && match name.as_str() {
-                    "count" => {
-                        arguments.is_empty()
-                            || (arguments.len() == 1
-                                && !matches!(arguments.first(), Some(ConnectExpression::Star)))
-                    }
+                    "count" => arguments.is_empty() || arguments.len() == 1,
                     "sum" => {
                         arguments.len() == 1
                             && !matches!(arguments.first(), Some(ConnectExpression::Star))

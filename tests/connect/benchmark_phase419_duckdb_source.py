@@ -30,6 +30,7 @@ except ImportError:  # Windows has no getrusage module.
 import duckdb
 from pyspark.sql.connect.session import SparkSession as ConnectSession
 
+from benchmark_lock import benchmark_lock
 from sparkless_server_duckdb import SparklessConnect
 
 
@@ -133,7 +134,9 @@ def main() -> None:
         else args.active_operations
     )
     if not 1 <= active_operations <= SOURCE_LIMITS["connections_per_catalog"]:
-        parser.error("active operations must be between 1 and the source connection cap")
+        parser.error(
+            "active operations must be between 1 and the source connection cap"
+        )
     if not 1 <= args.queue_timeout_ms <= 300_000:
         parser.error("queue timeout must be between 1 and 300000 milliseconds")
     if not 0 <= args.slow_reader_delay_ms <= 1000:
@@ -475,4 +478,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    with benchmark_lock():
+        main()

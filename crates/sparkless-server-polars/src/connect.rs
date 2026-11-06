@@ -179,7 +179,10 @@ fn deferred_count_batches(
 static CONNECT_PRODUCER_STARTS: AtomicU64 = AtomicU64::new(0);
 const CONNECT_GRACEFUL_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 const CONNECT_FORCE_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
-const CONNECT_RESPONSE_STALL_TIMEOUT: Duration = Duration::from_secs(5);
+// gRPC clients can buffer several MiB before granting more HTTP/2 send credit. Let a
+// deliberately paced reader drain that buffer; keep operation and ACK deadlines separate.
+const CONNECT_RESPONSE_STALL_TIMEOUT: Duration = Duration::from_secs(30);
+const CONNECT_RESPONSE_ACK_TIMEOUT: Duration = Duration::from_secs(5);
 const CONNECT_FIRST_BATCH_ACK_GRACE: Duration = Duration::from_millis(50);
 
 struct CancelTokenOnDrop(robin_sparkless_core::engine::CancellationToken);
@@ -849,7 +852,7 @@ impl ConnectResponseSender {
                     drop(self.compute_permit.take());
                     let ack_started = Instant::now();
                     let ack_deadline =
-                        (ack_started + CONNECT_RESPONSE_STALL_TIMEOUT).min(self.deadline);
+                        (ack_started + CONNECT_RESPONSE_ACK_TIMEOUT).min(self.deadline);
                     let acknowledged = operation.replay.wait_for_response_release(
                         &response_id,
                         ack_deadline,
@@ -1214,7 +1217,7 @@ fn start_connect_producer(
                         });
                     if send_stalled {
                         let status = Status::deadline_exceeded(
-                            "Connect response stream stalled without progress for 5 seconds",
+                            "Connect response stream stalled without progress for 30 seconds",
                         );
                         if stall_terminal.finish_deadline(status.clone()) {
                             if let Ok(mut record) = stall_operation.lock()

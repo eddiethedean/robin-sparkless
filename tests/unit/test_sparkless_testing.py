@@ -645,6 +645,29 @@ class TestComparisonDataFrames:
         assert result.equivalent is False
         assert result.schema_match is False
 
+    def test_compare_dataframes_detects_decimal_scale_difference(
+        self, spark, spark_imports
+    ):
+        """Schema comparison includes decimal scale when precision is unchanged."""
+        from decimal import Decimal
+
+        from sparkless_testing import compare_dataframes
+
+        types = spark_imports
+        scale_two = types.StructType(
+            [types.StructField("amount", types.DecimalType(10, 2), nullable=True)]
+        )
+        scale_three = types.StructType(
+            [types.StructField("amount", types.DecimalType(10, 3), nullable=True)]
+        )
+        actual = spark.createDataFrame([(Decimal("1.00"),)], scale_two)
+        expected = spark.createDataFrame([(Decimal("1.000"),)], scale_three)
+
+        result = compare_dataframes(actual, expected)
+
+        assert result.equivalent is False
+        assert result.schema_match is False
+
     def test_compare_dataframes_detects_nested_array_nullability(
         self, spark, spark_imports
     ):
@@ -673,6 +696,184 @@ class TestComparisonDataFrames:
 
         assert result.equivalent is False
         assert result.schema_match is False
+
+    def test_compare_dataframes_detects_nested_struct_field_nullability(
+        self, spark, spark_imports
+    ):
+        """Schema comparison recursively checks nested struct fields."""
+        from sparkless_testing import compare_dataframes
+
+        types = spark_imports
+        nullable_child = types.StructType(
+            [types.StructField("child", types.IntegerType(), nullable=True)]
+        )
+        required_child = types.StructType(
+            [types.StructField("child", types.IntegerType(), nullable=False)]
+        )
+        actual_schema = types.StructType(
+            [types.StructField("nested", nullable_child, nullable=True)]
+        )
+        expected_schema = types.StructType(
+            [types.StructField("nested", required_child, nullable=True)]
+        )
+        actual = spark.createDataFrame([({"child": 1},)], actual_schema)
+        expected = spark.createDataFrame([({"child": 1},)], expected_schema)
+
+        result = compare_dataframes(actual, expected)
+
+        assert result.equivalent is False
+        assert result.schema_match is False
+
+    def test_compare_dataframes_detects_map_value_nullability(
+        self, spark, spark_imports
+    ):
+        """Schema comparison includes map value nullability."""
+        from sparkless_testing import compare_dataframes
+
+        types = spark_imports
+        nullable_values = types.StructType(
+            [
+                types.StructField(
+                    "values",
+                    types.MapType(
+                        types.StringType(), types.LongType(), valueContainsNull=True
+                    ),
+                )
+            ]
+        )
+        required_values = types.StructType(
+            [
+                types.StructField(
+                    "values",
+                    types.MapType(
+                        types.StringType(), types.LongType(), valueContainsNull=False
+                    ),
+                )
+            ]
+        )
+        actual = spark.createDataFrame([({"one": 1},)], nullable_values)
+        expected = spark.createDataFrame([({"one": 1},)], required_values)
+
+        result = compare_dataframes(actual, expected)
+
+        assert result.equivalent is False
+        assert result.schema_match is False
+
+    def test_compare_dataframes_detects_field_metadata_difference(
+        self, spark, spark_imports
+    ):
+        """Schema comparison includes field metadata."""
+        from sparkless_testing import compare_dataframes
+
+        types = spark_imports
+        actual_schema = types.StructType(
+            [
+                types.StructField(
+                    "id", types.IntegerType(), nullable=True, metadata={"source": "a"}
+                )
+            ]
+        )
+        expected_schema = types.StructType(
+            [
+                types.StructField(
+                    "id", types.IntegerType(), nullable=True, metadata={"source": "b"}
+                )
+            ]
+        )
+        actual = spark.createDataFrame([(1,)], actual_schema)
+        expected = spark.createDataFrame([(1,)], expected_schema)
+
+        result = compare_dataframes(actual, expected)
+
+        assert result.equivalent is False
+        assert result.schema_match is False
+
+    def test_compare_dataframes_rejects_expected_field_details_missing_from_actual(
+        self,
+    ):
+        """Declared nullability and metadata cannot match an underspecified schema."""
+        from sparkless_testing import compare_dataframes
+
+        class MappingBackedFrame:
+            columns = ["id"]
+            schema = [{"name": "id", "type": "long"}]
+
+            @staticmethod
+            def collect():
+                return [{"id": 1}]
+
+        expected = {
+            "schema": [
+                {
+                    "name": "id",
+                    "type": "long",
+                    "nullable": False,
+                    "metadata": {"source": "declared"},
+                }
+            ],
+            "data": [{"id": 1}],
+        }
+
+        result = compare_dataframes(MappingBackedFrame(), expected)
+
+        assert result.equivalent is False
+        assert result.schema_match is False
+
+    def test_compare_dataframes_rejects_missing_nested_nullability_detail(self):
+        """A declared array element nullability requires an actual schema value."""
+        from sparkless_testing import compare_dataframes
+
+        class MappingBackedFrame:
+            columns = ["values"]
+            schema = [
+                {
+                    "name": "values",
+                    "type": {"type": "array", "elementType": "long"},
+                }
+            ]
+
+            @staticmethod
+            def collect():
+                return [{"values": [1]}]
+
+        expected = {
+            "schema": [
+                {
+                    "name": "values",
+                    "type": {
+                        "type": "array",
+                        "elementType": "long",
+                        "containsNull": False,
+                    },
+                }
+            ],
+            "data": [{"values": [1]}],
+        }
+
+        result = compare_dataframes(MappingBackedFrame(), expected)
+
+        assert result.equivalent is False
+        assert result.schema_match is False
+
+    def test_compare_dataframes_check_schema_false_ignores_schema_differences(
+        self, spark, spark_imports
+    ):
+        """Disabling schema checks permits matching values with different schemas."""
+        from sparkless_testing import compare_dataframes
+
+        types = spark_imports
+        nullable = types.StructType(
+            [types.StructField("id", types.LongType(), nullable=True)]
+        )
+        required = types.StructType(
+            [types.StructField("id", types.LongType(), nullable=False)]
+        )
+        actual = spark.createDataFrame([(1,)], nullable)
+        expected = spark.createDataFrame([(1,)], required)
+
+        result = compare_dataframes(actual, expected, check_schema=False)
+
+        assert result.equivalent is True
 
     def test_compare_dataframes_uses_schema_for_mapping_expected(self, spark):
         """Mapping expectations compare declared fields, even for empty rows."""

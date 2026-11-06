@@ -1,0 +1,219 @@
+{
+  "artifacts": {
+    "quack_extension": "/Volumes/T7/coding/robin-sparkless/python/server-duckdb/build/lib.macosx-26.0-arm64-cpython-311/sparkless_server_duckdb/quack.duckdb_extension",
+    "quack_extension_sha256": "ef547f01cb30412aa6dbade59bdd5254ed897ba4f113a1700e3e01e00a747935",
+    "quack_fixture_owner": "/Volumes/T7/coding/robin-sparkless/target/debug/examples/duckdb_quack_fixture_owner",
+    "quack_fixture_owner_sha256": "e71fd5f4f5bbdf1425e448b0aa3779ac75e106c325dfaee93e9af6093f8131bb",
+    "runner_sha256": "39b3a0a83ecbc03193df05baca225a281d5d05e670052234eaff216d2e7fceaa",
+    "server_binary": "/Volumes/T7/coding/robin-sparkless/target/debug/sparkless-server-duckdb",
+    "server_sha256": "5615d184a4818c5862c4a3d92b2719b21991a44c8fc1d6e011fa9072a33cd5f3"
+  },
+  "cases": {
+    "catalog_change_between_analysis_and_execution": {
+      "analyzed_schema": {
+        "fields": [
+          {
+            "metadata": {},
+            "name": "id",
+            "nullable": true,
+            "type": "integer"
+          },
+          {
+            "metadata": {},
+            "name": "label",
+            "nullable": true,
+            "type": "string"
+          }
+        ],
+        "type": "struct"
+      },
+      "rows_after_update": [
+        [
+          1,
+          "before-analysis"
+        ],
+        [
+          2,
+          "after-analysis"
+        ]
+      ]
+    },
+    "connect_write_visible_to_connect": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "connect_write_visible_to_independent_reader": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "existing_execution_connection_failure_while_stopped": "SparkException",
+    "fresh_query_after_owner_process_restart": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "fresh_query_after_owner_restart": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "independent_writer_visible_to_connect": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "infinite_date_rejected": "SparkException",
+    "infinite_timestamp_rejected": "SparkException",
+    "nested_type_rejected": "SparkException",
+    "new_independent_connection_rejected_while_owner_stopped": true,
+    "non_finite_double_rejected": "SparkException",
+    "quack_owner_loss_during_active_stream": {
+      "first_batch": {
+        "first_batch_ms": 19460.149083053693,
+        "operation_id": "e90db326-addc-40d4-bcb9-dac049691cd5",
+        "rows": 2048
+      },
+      "fresh_connect_session_after_owner_recovery": false,
+      "health_while_owner_down": {
+        "status": "ready"
+      },
+      "owner_killed_during_active_stream": true,
+      "owner_restarted_with_same_identity": true,
+      "reader_exit_code": 0,
+      "reader_failure": "I1105 23:58:37.258123 43600804 ev_poll_posix.cc:588] FD from fork parent still in poll list: fd(12, generation: 1)\n",
+      "reader_result": {
+        "elapsed_seconds": 72.3293332499452,
+        "first_batch_ms": 19460.149083053693,
+        "operation_id": "e90db326-addc-40d4-bcb9-dac049691cd5",
+        "pause_ms_per_response": 100.0,
+        "reattachable": true,
+        "release_rpcs": 490,
+        "responses": 489,
+        "rows": 1000000
+      },
+      "rows_after_owner_recovery": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "rows_from_independent_client_after_owner_recovery": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "same_session_recovery_error": "user error: DuckDB execution failed: Invalid Input Error: Invalid connection id\n\nJVM stacktrace:\n",
+      "same_session_retry_error": null,
+      "same_session_retry_succeeded": true,
+      "stream_outcome": "completed_after_owner_loss",
+      "stream_rows": 1000000
+    },
+    "quack_query_cancellation": {
+      "cancelled": true,
+      "error_type": "SparkException",
+      "interrupted_operation_count": 1,
+      "post_cancel_control_count": 3
+    },
+    "quack_receipt_replay_after_both_process_restarts": {
+      "changed_request_under_same_identity_rejected": true,
+      "durable_receipt_before_retry": true,
+      "identity_replayed_on_new_instance": true,
+      "owner_process_ids": [
+        72270,
+        72277
+      ],
+      "receipt_key": "connect-operation:ea0db896387edd2190fed78f845e48258fb84188b8140125a746d874f41fc15a",
+      "receipt_unchanged_after_conflict": true,
+      "receipt_unchanged_after_retry": true,
+      "request_fingerprint": "3a05cb45e9267692767cb9123acb79bbde9a02229d05521f8420ef55a3bd0942",
+      "retry_result_complete_received": true,
+      "rows_after_retry": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "rows_before_retry": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "rows_unchanged_after_conflict": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "server_instance_ids": [
+        "1ffdf770-18a5-4ca2-9c0b-b7ca1c625111",
+        "8a3e1ce6-1191-43b4-b071-2ce2e25a4609",
+        "93f1cc66-5c23-4641-a113-1b0c37dcc2c4"
+      ]
+    },
+    "query_failed_during_owner_process_loss": "SparkException",
+    "range_execution_control": 3,
+    "reattached_connect_write_committed_once": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "write_after_owner_process_restart_visible_to_reader": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ]
+  },
+  "duckdb_execution_witness_count": 1,
+  "environment": {
+    "platform": "macOS-26.5.2-arm64-arm-64bit",
+    "pyspark_client": "4.0.5",
+    "python": "3.11.15"
+  },
+  "format_version": 1,
+  "limitations": [
+    "This is a local source-binary probe on one host, not a cross-platform or release-artifact check.",
+    "The Quack process-restart replay uses a file-backed local fixture owner and does not inject a failure at the transaction commit boundary."
+  ],
+  "owner_mode": "shared Quack service; separate fixture and server processes",
+  "timestamp_utc": "2026-11-06T04:59:56.279518+00:00"
+}

@@ -83,12 +83,16 @@ pub(crate) fn open_source_with_http_timeout(
 }
 
 pub(crate) fn quack_connection_id(connection: &Connection) -> Result<String, EngineError> {
+    quack_connection_id_for(connection, QUACK_CATALOG)
+}
+
+pub(crate) fn quack_connection_id_for(
+    connection: &Connection,
+    catalog: &str,
+) -> Result<String, EngineError> {
     connection
         .query_row(
-            &format!(
-                "SELECT quack_connection_id({})",
-                quote_literal(QUACK_CATALOG)
-            ),
+            &format!("SELECT quack_connection_id({})", quote_literal(catalog)),
             [],
             |row| row.get(0),
         )

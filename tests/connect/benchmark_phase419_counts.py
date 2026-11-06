@@ -18,6 +18,7 @@ from typing import Any
 from pyspark.sql import functions as F
 from pyspark.sql.connect.session import SparkSession as ConnectSession
 
+from benchmark_lock import benchmark_lock
 from sparkless_connect import SparklessConnect
 
 
@@ -177,4 +178,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    with benchmark_lock():
+        main()

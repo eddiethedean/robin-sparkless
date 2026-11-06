@@ -1,0 +1,67 @@
+{
+  "checks": [
+    {
+      "command": "PYTHONPATH=python/testing .venv/bin/python -m pytest tests/unit/test_sparkless_testing.py -q",
+      "environment": "Sparkless",
+      "failed": 0,
+      "passed": 126,
+      "python": "3.11.14"
+    },
+    {
+      "environment": "Apache Spark 4.0.5 via its bundled pyspark.zip and py4j zip",
+      "failed": 0,
+      "passed": 23,
+      "python": "3.11.14",
+      "spark_archive_sha512": "4cc2e43959b5e0a67b7d895e1aa1fb3ab05fa6ad4a5912de76236bb9b70f9557b20837b05ee63474798e927130e72ed6d1fadcd273a71e65c70eac18771c0d6b",
+      "suite": "TestComparisonDataFrames"
+    },
+    {
+      "declared_dependencies": [
+        "pytest>=7"
+      ],
+      "environment": "isolated wheel environment with no PySpark installed",
+      "import_succeeded": true,
+      "pyspark_available": false,
+      "python": "3.11.15",
+      "wheel": "sparkless_testing-4.19.0-py3-none-any.whl",
+      "wheel_sha256": "458ab2397bb3ebaea6e1a3882d7b3c75b3b69d19a1dc4f6706b00c5a8681f00e"
+    },
+    {
+      "command": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=python/sparkless:python/native:python/testing:python/server-duckdb:python/connect:tests/connect pytest tests/unit/test_sparkless_testing.py tests/connect/test_slice8_harness.py tests/server/test_launcher.py -q",
+      "environment": "workspace sources; Python 3.11.14; pytest plugin autoload disabled because the system pytest_cases plugin is incompatible with the installed pytest",
+      "failed": 0,
+      "passed": 157,
+      "python": "3.11.14",
+      "subtests_passed": 7,
+      "suite": "workspace helper, benchmark harness, and launcher tests",
+      "warnings": 1
+    }
+  ],
+  "coverage": [
+    "field order and names",
+    "top-level nullability",
+    "field metadata",
+    "decimal precision and scale",
+    "nested struct fields",
+    "array element nullability",
+    "map value nullability",
+    "empty mapping expectations with declared schema",
+    "check_schema=False behavior",
+    "missing actual schema details do not match declared expected details"
+  ],
+  "format_version": 1,
+  "limitations": [
+    "The wheel is a local build carrying the current 4.19.0 source version; it was not published.",
+    "The coordinated 4.20 package version and public artifact installation remain release work."
+  ],
+  "phase": "4.20",
+  "platform": "macOS 26.5.2 arm64",
+  "result": "local source and packaging checks passed",
+  "run_date_utc": "2026-11-06",
+  "slice": "420-06 / #1746",
+  "source": {
+    "comparison_py_sha256": "b4c8095385bc0580219a7b9cab3721c95b95e863de28e9f746b7d93bae087929",
+    "test_sparkless_testing_py_sha256": "b752889e75ec995d42a32688c939421b088b51bd97a6cbadfe287ec45155b2f2"
+  },
+  "source_revision": "0b5c59fe198b3e06595f10e8c95e843eb956c703"
+}

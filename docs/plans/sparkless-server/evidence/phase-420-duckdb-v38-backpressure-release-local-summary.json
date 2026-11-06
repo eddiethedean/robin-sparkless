@@ -1,0 +1,164 @@
+{
+  "conclusion": "The 30-second network send-stall grace removes the reproduced backpressure failure on the tested local owner and shared Quack owner. At active_operations=16, both 8-client 60-second cohorts pass with zero capacity rejections, both concurrent and final paced readers return one million rows, health probes stay clean, and both processes shut down gracefully. At active_operations=8, the additional ninth operation is rejected during the cohort by the configured compute queue timeout, while the final standalone reader passes. This closes the observed non-reattachable send-stall defect on this macOS host; it does not establish a cross-platform support envelope or close the other V38 gates.",
+  "format_version": 1,
+  "gate": "V38 non-reattachable response backpressure",
+  "implementation": {
+    "reattachable_response_ack_timeout_seconds": 5,
+    "send_stall_timeout_seconds": 30,
+    "source": "crates/sparkless-server-polars/src/connect.rs",
+    "source_sha256": "ce77243349efff0a32f90e5d3087c9091ce78d31c8e207a14efc534dd087502c"
+  },
+  "isolated_direct_reader": {
+    "comparison": "The pre-fix binary failed at 765,952 rows with the 5-second watchdog; this final binary returns all one million rows under the same 100 ms pace.",
+    "paced_100ms": {
+      "result": {
+        "elapsed_seconds": 51.92388024996035,
+        "first_batch_ms": 18.05945811793208,
+        "operation_id": "396bd185-a46e-4b71-be35-f3f74e2eb2df",
+        "pause_ms_per_response": 100.0,
+        "reattachable": false,
+        "release_rpcs": 0,
+        "responses": 489,
+        "rows": 1000000
+      },
+      "returncode": 0,
+      "stderr": ""
+    },
+    "raw_report_sha256": "c08138505833fac3009649d618fc33191145a44d42bcc1d5a665c09abea5d7a7",
+    "report": "phase-420-duckdb-v38-release-direct-reader-fixed-local.json.gz",
+    "report_sha256": "582cfeab330b3ec49e7e9fc65cbdafd81f8e2d796ded438eadc4e90936f75715"
+  },
+  "limitations": [
+    "One local macOS arm64 host; release-profile executable is not a packaged 4.20.0 artifact.",
+    "A 5-second watchdog failure on the prior candidate is retained at phase-420-duckdb-v38-release-direct-reader-local.json; release window/transport settings were not otherwise changed.",
+    "Cross-platform behavior, capacity/resource budgets at the intended production envelope, concurrent owner loss, storage failure durability, and release artifact checks remain open.",
+    "The local RLIMIT_FSIZE COMMIT fault reopened with zero rows and zero receipts; recovery after other partial-I/O failures and on supported platforms remains unverified."
+  ],
+  "load_checks": {
+    "local_active16": {
+      "active_operations": 16,
+      "capacity_rejection_count": 0,
+      "cohort_seconds": 60,
+      "concurrency": 8,
+      "concurrent_reader": {
+        "elapsed_seconds": 52.0273401660379,
+        "first_batch_ms": 79.72695794887841,
+        "operation_id": "0952f741-ed98-4a18-9996-01cd4ac52362",
+        "pause_ms_per_response": 100.0,
+        "reattachable": false,
+        "release_rpcs": 0,
+        "responses": 489,
+        "rows": 1000000
+      },
+      "correct_operations": 804,
+      "final_reader": {
+        "capacity_rejection": null,
+        "responses": 489,
+        "rows": 1000000,
+        "wall_seconds": 52.422797665931284
+      },
+      "health_probe_errors": [],
+      "operations_per_second": 13.262610435689886,
+      "owner_graceful_shutdown": null,
+      "report": "phase-420-duckdb-v38-release-local_active16-nonreattachable-local.json.gz",
+      "report_sha256": "7d3424028b8413a8cd183b1f03963fbff324dbebca2803bd9bba837c204647b1",
+      "result": "passed",
+      "server_graceful_shutdown": true
+    },
+    "local_active8": {
+      "active_operations": 8,
+      "capacity_rejection_count": 1,
+      "cohort_seconds": 60,
+      "concurrency": 8,
+      "concurrent_reader": null,
+      "correct_operations": 1292,
+      "final_reader": {
+        "capacity_rejection": null,
+        "responses": 489,
+        "rows": 1000000,
+        "wall_seconds": 52.24013133300468
+      },
+      "health_probe_errors": [],
+      "operations_per_second": 21.22051687521302,
+      "owner_graceful_shutdown": null,
+      "report": "phase-420-duckdb-v38-release-local_active8-nonreattachable-local.json.gz",
+      "report_sha256": "4719fbef0ad19a1d164c90c22ad1f396c0a87bea5d3278bbf6f26aa7b3f658af",
+      "result": "capacity_rejections_observed",
+      "server_graceful_shutdown": true
+    },
+    "quack_active16": {
+      "active_operations": 16,
+      "capacity_rejection_count": 0,
+      "cohort_seconds": 60,
+      "concurrency": 8,
+      "concurrent_reader": {
+        "elapsed_seconds": 52.330248459009454,
+        "first_batch_ms": 171.39725014567375,
+        "operation_id": "26254b6a-5886-4d02-a9b4-8c12239bde33",
+        "pause_ms_per_response": 100.0,
+        "reattachable": false,
+        "release_rpcs": 0,
+        "responses": 489,
+        "rows": 1000000
+      },
+      "correct_operations": 732,
+      "final_reader": {
+        "capacity_rejection": null,
+        "responses": 489,
+        "rows": 1000000,
+        "wall_seconds": 52.47463966603391
+      },
+      "health_probe_errors": [],
+      "operations_per_second": 12.071227713827641,
+      "owner_graceful_shutdown": true,
+      "report": "phase-420-duckdb-v38-release-quack_active16-nonreattachable-local.json.gz",
+      "report_sha256": "07fc55ecf80b47874f37b0e7b3ff050ee74834a12795d24d5bdc6a15d59fc019",
+      "result": "passed",
+      "server_graceful_shutdown": true
+    }
+  },
+  "phase": "4.20",
+  "platform": "macOS 26.5.2 arm64",
+  "resource_observations": {
+    "interpretation": "One-host measurements from the 60-second, 8-client cohorts; not acceptance budgets or cross-platform guarantees.",
+    "local_active16": {
+      "correct_operations": 804,
+      "health_latency_ms": {
+        "p50": 0.8123337756842375,
+        "p95": 1.7454579938203096
+      },
+      "health_probe_count": 568,
+      "operation_latency_ms": {
+        "p50": 339.2597921192646,
+        "p95": 568.4479170013219,
+        "p99": 817.1146248932928
+      },
+      "operation_latency_sample_count": 804,
+      "operations_per_second": 13.262610435689886,
+      "owner_rss_sampling": "included in server process RSS",
+      "server_peak_rss_bytes": 65355776
+    },
+    "quack_active16": {
+      "correct_operations": 732,
+      "health_latency_ms": {
+        "p50": 0.8852919563651085,
+        "p95": 6.334875011816621
+      },
+      "health_probe_count": 564,
+      "latency_note": "The sampled p99 was 28.3 seconds, a cohort outlier; this run has no agreed latency budget and should not be read as an acceptance result.",
+      "operation_latency_ms": {
+        "p50": 344.9754579924047,
+        "p95": 597.2844159696251,
+        "p99": 28311.20958388783
+      },
+      "operation_latency_sample_count": 732,
+      "operations_per_second": 12.071227713827641,
+      "owner_peak_rss_bytes": 63586304,
+      "server_peak_rss_bytes": 90652672
+    }
+  },
+  "server_binary": "target/release/sparkless-server-duckdb",
+  "server_binary_sha256": "8a04356ca6c51849b42bb01e6e062f9c67859ec9da5c03a852b6bb2d80e26971",
+  "source_revision": "0b5c59fe198b3e06595f10e8c95e843eb956c703",
+  "timestamp_utc": "2026-11-06T06:30:28.335875+00:00"
+}
