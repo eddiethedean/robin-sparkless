@@ -350,6 +350,37 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("smoke_phase420_duckdb_container.py", container_commands)
         self.assertIn("SPARKLESS_EXECUTION_BACKEND=duckdb", container_commands)
 
+        resource_step = next(
+            step
+            for step in steps
+            if step.get("name")
+            == "Measure the Phase 4.20 owner and stream resource envelope"
+        )
+        resource_command = resource_step["run"]
+        self.assertIn("benchmark_args=(", resource_command)
+        self.assertIn(
+            "benchmark_args+=(--non-reattachable-slow-reader)", resource_command
+        )
+        self.assertIn('"${benchmark_args[@]}"', resource_command)
+        self.assertNotIn('"${reader_args[@]}"', resource_command)
+
+        bash_32_optional_array_script = """
+set -euo pipefail
+for reader_mode in reattachable non-reattachable; do
+  benchmark_args=(--rows 1000000)
+  if [[ "$reader_mode" == non-reattachable ]]; then
+    benchmark_args+=(--non-reattachable-slow-reader)
+  fi
+  set -- "${benchmark_args[@]}"
+  if [[ "$reader_mode" == non-reattachable ]]; then
+    test "$#" -eq 3
+  else
+    test "$#" -eq 2
+  fi
+done
+"""
+        self.assertEqual(run_script(bash_32_optional_array_script).returncode, 0)
+
     def test_every_validation_job_is_required_before_publishing(self):
         jobs = workflow("release.yml")["jobs"]
         gate = jobs["release-validation-gate"]

@@ -1106,22 +1106,24 @@ jobs:
           quack_extension="$(.venv-phase420/bin/python -c 'from sparkless_server_duckdb import quack_extension_path; print(quack_extension_path())')"
           owner_bin="$GITHUB_WORKSPACE/quack-fixture/duckdb_quack_fixture_owner"
           for reader_mode in reattachable non-reattachable; do
-            reader_args=()
-            if [[ "$reader_mode" == non-reattachable ]]; then
-              reader_args+=(--non-reattachable-slow-reader)
-            fi
             for owner_mode in local quack; do
               output="$RUNNER_TEMP/phase420-v38/${owner_mode}-${reader_mode}"
+              benchmark_args=(
+                --client-python "$GITHUB_WORKSPACE/.venv-phase420/bin/python"
+                --server-bin "$duckdb_bin" --profile 419 --concurrency 8
+                --duration-seconds 60 --active-operations 16 --queue-timeout-ms 5000
+                --response-timeout-ms 120000 --rows 1000000 --slow-reader-rows 1000000
+                --slow-reader-pause-ms 100
+              )
+              if [[ "$reader_mode" == non-reattachable ]]; then
+                benchmark_args+=(--non-reattachable-slow-reader)
+              fi
               owner_args=(--duckdb-local-owner)
               if [[ "$owner_mode" == quack ]]; then
                 owner_args=(--quack-owner-bin "$owner_bin" --quack-extension-path "$quack_extension")
               fi
               .venv-phase420/bin/python tests/connect/run_slice8_benchmarks.py \
-                --client-python "$GITHUB_WORKSPACE/.venv-phase420/bin/python" \
-                --server-bin "$duckdb_bin" --profile 419 --concurrency 8 \
-                --duration-seconds 60 --active-operations 16 --queue-timeout-ms 5000 \
-                --response-timeout-ms 120000 --rows 1000000 --slow-reader-rows 1000000 \
-                --slow-reader-pause-ms 100 "${owner_args[@]}" "${reader_args[@]}" \
+                "${benchmark_args[@]}" "${owner_args[@]}" \
                 --output "$output"
               report="$(find "$output" -name benchmark.json -print -quit)"
               test -n "$report"
