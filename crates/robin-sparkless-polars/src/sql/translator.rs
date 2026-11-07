@@ -4628,6 +4628,35 @@ mod insert_literal_tests {
     use super::*;
 
     #[test]
+    fn sql_numeric_string_literal_comparison_uses_numeric_coercion() {
+        let session = SparkSession::new(
+            Some("numeric-string-literal-comparison".into()),
+            None,
+            HashMap::new(),
+        );
+        session
+            .create_or_replace_temp_view("numeric_string_source", session.range(0, 1, 1).unwrap());
+
+        let output = session
+            .sql(
+                "SELECT 1.2 = '1.20' AS equal, 1.2 = '1.24' AS different FROM numeric_string_source",
+            )
+            .unwrap();
+        let fields = output.schema().unwrap().logical_fields().to_vec();
+        assert!(fields.iter().all(|field| field.nullable));
+
+        let rows = output.collect().unwrap();
+        assert_eq!(
+            rows.column("equal").unwrap().bool().unwrap().get(0),
+            Some(true)
+        );
+        assert_eq!(
+            rows.column("different").unwrap().bool().unwrap().get(0),
+            Some(false)
+        );
+    }
+
+    #[test]
     fn wildcard_projection_preserves_rows_names_and_logical_schema() {
         let session = SparkSession::new(Some("wildcard-regression".into()), None, HashMap::new());
         let frame = polars::df!("a.b" => &[1i64, 3], "A" => &[2i64, 4], "a" => &[5i64, 6], "*" => &[7i64, 8]).unwrap();

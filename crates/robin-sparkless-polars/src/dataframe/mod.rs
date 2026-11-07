@@ -293,6 +293,24 @@ fn projected_expression_nullability(
     schema: &StructType,
     case_sensitive: bool,
 ) -> Option<bool> {
+    fn literal_dtype(expression: &Expr) -> Option<DataType> {
+        match expression {
+            Expr::Alias(inner, _) => literal_dtype(inner),
+            Expr::Literal(value) => Some(value.get_datatype()),
+            _ => None,
+        }
+    }
+
+    fn is_numeric_literal(expression: &Expr) -> bool {
+        literal_dtype(expression).is_some_and(|dtype| {
+            is_numeric_public(&dtype)
+                || matches!(
+                    dtype,
+                    DataType::Unknown(UnknownKind::Int(_) | UnknownKind::Float)
+                )
+        })
+    }
+
     match expression {
         Expr::Alias(inner, _) => projected_expression_nullability(inner, schema, case_sensitive),
         Expr::Column(name) => {
@@ -321,10 +339,14 @@ fn projected_expression_nullability(
                 .collect::<Option<Vec<_>>>()?;
             Some(arguments.into_iter().any(|nullable| nullable))
         }
-        Expr::BinaryExpr { left, op, right } => {
+        Expr::BinaryExpr {
+            left: left_expr,
+            op,
+            right: right_expr,
+        } => {
             use polars::prelude::Operator;
-            let left = projected_expression_nullability(left, schema, case_sensitive)?;
-            let right = projected_expression_nullability(right, schema, case_sensitive)?;
+            let left = projected_expression_nullability(left_expr, schema, case_sensitive)?;
+            let right = projected_expression_nullability(right_expr, schema, case_sensitive)?;
             match op {
                 Operator::EqValidity | Operator::NotEqValidity => Some(false),
                 Operator::Eq
@@ -332,9 +354,15 @@ fn projected_expression_nullability(
                 | Operator::Lt
                 | Operator::LtEq
                 | Operator::Gt
-                | Operator::GtEq
-                | Operator::And
-                | Operator::Or => Some(left || right),
+                | Operator::GtEq => {
+                    let left_type = literal_dtype(left_expr);
+                    let right_type = literal_dtype(right_expr);
+                    let literal_cast_may_return_null = (is_numeric_literal(left_expr)
+                        && right_type == Some(DataType::String))
+                        || (is_numeric_literal(right_expr) && left_type == Some(DataType::String));
+                    Some(left || right || literal_cast_may_return_null)
+                }
+                Operator::And | Operator::Or => Some(left || right),
                 _ => None,
             }
         }
@@ -979,10 +1007,10 @@ impl DataFrame {
     /// Rewrite comparison expressions to apply PySpark-style type coercion.
     ///
     /// This walks the expression tree and, for comparison operators where one side is
-    /// a column and the other is a numeric literal, delegates to
-    /// `coerce_for_pyspark_comparison` so that string–numeric comparisons behave like
-    /// PySpark (string values parsed to numbers where possible, invalid strings treated
-    /// as null/non-matching).
+    /// a column and the other is a numeric literal, or when a numeric literal is
+    /// compared with a string literal, delegates to `coerce_for_pyspark_comparison`
+    /// so string–numeric comparisons behave like PySpark (string values parsed to
+    /// numbers where possible, invalid strings treated as null/non-matching).
     pub fn coerce_string_numeric_comparisons(&self, expr: Expr) -> Result<Expr, PolarsError> {
         use polars::prelude::{DataType, Operator};
         use std::sync::Arc;
@@ -1150,6 +1178,34 @@ impl DataFrame {
                         left: Arc::new(new_left),
                         op: *op,
                         right: Arc::new(new_right),
+                    }
+                } else if is_comparison_op
+                    && ((left_is_numeric_lit && right_is_string_lit)
+                        || (right_is_numeric_lit && left_is_string_lit))
+                {
+                    // SQL literal comparisons need the same numeric coercion as
+                    // column/literal comparisons. Besides matching values, the
+                    // nullable parse preserves Spark's schema for string-to-number
+                    // coercions such as `1.2 = '1.24'`.
+                    if let (Some(left_type), Some(right_type)) = (
+                        literal_dtype(left_inner).map(comparison_literal_dtype),
+                        literal_dtype(right_inner).map(comparison_literal_dtype),
+                    ) {
+                        let (new_left, new_right) = coerce_for_pyspark_comparison(
+                            left_inner.clone(),
+                            right_inner.clone(),
+                            &left_type,
+                            &right_type,
+                            op,
+                        )
+                        .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
+                        Expr::BinaryExpr {
+                            left: Arc::new(new_left),
+                            op: *op,
+                            right: Arc::new(new_right),
+                        }
+                    } else {
+                        expr_to_coerce.clone()
                     }
                 } else if root_is_col_vs_string {
                     let col_name = if left_is_col {
