@@ -3377,6 +3377,16 @@ fn sql_numeric_binary_type(
     if matches!(left, Float) || matches!(right, Float) {
         return Ok(Some(Float));
     }
+    if let (Some(left), Some(right)) = (integral_bits(left), integral_bits(right)) {
+        let data_type = if operator == "/" {
+            Double
+        } else if left.max(right) >= 64 {
+            Long
+        } else {
+            Integer
+        };
+        return Ok(Some(data_type));
+    }
     let left_decimal = decimal_shape(left);
     let right_decimal = decimal_shape(right);
     if let (Some((left_precision, left_scale)), Some((right_precision, right_scale))) =
@@ -3418,16 +3428,6 @@ fn sql_numeric_binary_type(
         };
         let (precision, scale) = adjust_decimal_precision(precision, scale);
         return Ok(Some(Decimal(precision, scale)));
-    }
-    if let (Some(left), Some(right)) = (integral_bits(left), integral_bits(right)) {
-        let data_type = if operator == "/" {
-            Double
-        } else if left.max(right) >= 64 {
-            Long
-        } else {
-            Integer
-        };
-        return Ok(Some(data_type));
     }
     if matches!(left, Byte | Short | Integer | Long)
         || matches!(right, Byte | Short | Integer | Long)
@@ -3505,15 +3505,18 @@ fn cast_sql_numeric_string(
                 "implicit string-to-number conversion is enabled for string literals only",
             )
         })?;
-    let valid = match target_type {
-        DataType::Byte => raw.parse::<i8>().is_ok(),
-        DataType::Short => raw.parse::<i16>().is_ok(),
-        DataType::Integer => raw.parse::<i32>().is_ok(),
+    // Spark's ANSI string precedence promotes integral comparisons to BIGINT and
+    // decimal/float comparisons to DOUBLE. Casting to the narrower operand type
+    // can round a string before comparison and change the result.
+    let comparison_type = match target_type {
+        DataType::Byte | DataType::Short | DataType::Integer | DataType::Long => DataType::Long,
+        DataType::Float | DataType::Double | DataType::Decimal(_, _) => DataType::Double,
+        _ => unreachable!("string coercion is called only for numeric operands"),
+    };
+    let valid = match comparison_type {
         DataType::Long => raw.parse::<i64>().is_ok(),
-        DataType::Float => raw.parse::<f32>().is_ok(),
         DataType::Double => raw.parse::<f64>().is_ok(),
-        DataType::Decimal(_, _) => raw.parse::<f64>().is_ok(),
-        _ => false,
+        _ => unreachable!("comparison type is chosen from numeric operands"),
     };
     if !valid {
         return Err(failure(
@@ -3521,7 +3524,7 @@ fn cast_sql_numeric_string(
             "string literal cannot be cast to the numeric type required by the expression",
         ));
     }
-    let target = numeric_sql_type(target_type).ok_or_else(|| {
+    let target = numeric_sql_type(&comparison_type).ok_or_else(|| {
         failure(
             "CONNECT_SQL_TYPE_UNSUPPORTED",
             "numeric cast target is unsupported",
@@ -3746,14 +3749,16 @@ fn failure(code: &'static str, message: &str) -> ExecutionError {
 mod tests {
     use super::validate_sql_query_shape;
     use super::{
-        DuckDbConnectExecution, DuckDbConnectSession, render_connect_expression_string,
-        simple_insert,
+        DuckDbConnectExecution, DuckDbConnectSession, cast_sql_numeric_string,
+        render_connect_expression_string, simple_insert, sql_numeric_binary_type,
     };
+    use robin_sparkless_core::DataType;
     use robin_sparkless_core::engine::CancellationToken;
     use robin_sparkless_duckdb::{
         DUCKDB_EXECUTION_MAX_BATCH_BYTES, DUCKDB_EXECUTION_MAX_BATCH_ROWS, DuckDbExecutionOwner,
         DuckDbExecutionOwnerConfig,
     };
+    use robin_sparkless_sql::{ExpressionShape, SqlExpression};
     use sparkless_server_core::{
         ConnectCommand, ConnectExecutionPlan, ConnectExecutionPort, ConnectExecutionRequest,
         ConnectExpression, ConnectOperationIdentity, ConnectRelation, ConnectRelationKind,
@@ -3838,6 +3843,45 @@ mod tests {
                 "expected unsupported SQL shape to be rejected: {sql}"
             );
         }
+    }
+
+    #[test]
+    fn sql_arithmetic_preserves_spark_integral_result_types() {
+        assert!(matches!(
+            sql_numeric_binary_type("+", &DataType::Integer, &DataType::Integer).unwrap(),
+            Some(DataType::Integer)
+        ));
+        assert!(matches!(
+            sql_numeric_binary_type("/", &DataType::Integer, &DataType::Integer).unwrap(),
+            Some(DataType::Double)
+        ));
+        assert!(matches!(
+            sql_numeric_binary_type("+", &DataType::Long, &DataType::Integer).unwrap(),
+            Some(DataType::Long)
+        ));
+    }
+
+    #[test]
+    fn sql_string_comparisons_use_spark_numeric_precedence() {
+        let literal = SqlExpression {
+            shape: ExpressionShape::Literal,
+            sql: "'1.24'".into(),
+            debug: "'1.24'".into(),
+        };
+        assert_eq!(
+            cast_sql_numeric_string(&literal, &DataType::Decimal(2, 1)).unwrap(),
+            "CAST('1.24' AS DOUBLE)"
+        );
+
+        let large_integer = SqlExpression {
+            shape: ExpressionShape::Literal,
+            sql: "'2147483648'".into(),
+            debug: "'2147483648'".into(),
+        };
+        assert_eq!(
+            cast_sql_numeric_string(&large_integer, &DataType::Integer).unwrap(),
+            "CAST('2147483648' AS BIGINT)"
+        );
     }
 
     #[test]

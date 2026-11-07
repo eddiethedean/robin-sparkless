@@ -268,6 +268,8 @@ def workload(spark: Any, *, owner_table_exists: bool) -> dict[str, dict[str, Any
             "id = 1 AS equal_one, id != 1 AS not_equal_one, id <> 1 AS alternate_not_equal_one, "
             "id > 1 AS greater_than_one, id >= 1 AS at_least_one, "
             "id < 3 AS less_than_three, id <= 3 AS at_most_three, "
+            "1.2 = '1.24' AS decimal_string_comparison, "
+            "'2147483648' > id AS wide_integer_string_comparison, "
             "NOT id = 2 AS not_two, label IS NULL AS label_is_null, "
             "COUNT(*) AS rows, SUM(id) AS id_sum "
             "FROM phase420_events WHERE id = 1 OR id >= 3 AND id <= 3 "
