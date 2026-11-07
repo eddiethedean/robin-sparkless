@@ -123,11 +123,11 @@ class ReleaseWorkflowTests(unittest.TestCase):
         token_preflight = next(
             step
             for step in metadata_steps
-            if step.get("name") == "Require the PyPI API token for new projects"
+            if step.get("name") == "Require the PyPI API token for first-time projects"
         )
         self.assertEqual(
             token_preflight.get("if"),
-            "steps.context.outputs.publish_python == 'true'",
+            "steps.context.outputs.publish_python == 'true' && vars.PYPI_NEW_PROJECTS == 'true'",
         )
         self.assertEqual(
             token_preflight.get("env", {}).get("PYPI_API_TOKEN"),
@@ -135,37 +135,29 @@ class ReleaseWorkflowTests(unittest.TestCase):
         )
         self.assertIn('-z "${PYPI_API_TOKEN:-}"', token_preflight["run"])
 
-        token_publishers = (
+        existing_project_publishers = (
+            "publish-native",
             "publish-connect",
             "publish-server-products",
             "publish-testing",
+            "publish-sparkless",
         )
-        for name in token_publishers:
-            with self.subTest(publisher=name):
-                job = jobs[name]
-                self.assertNotIn("id-token", job["permissions"])
-                publish_step = next(
-                    step
-                    for step in job["steps"]
-                    if step.get("uses", "").startswith("pypa/gh-action-pypi-publish@")
-                )
-                self.assertEqual(
-                    publish_step["with"].get("password"),
-                    "${{ secrets.PYPI_API_TOKEN }}",
-                )
-                self.assertIs(publish_step["with"].get("attestations"), False)
-
-        oidc_publishers = ("publish-native", "publish-sparkless")
-        for name in oidc_publishers:
+        for name in existing_project_publishers:
             with self.subTest(publisher=name):
                 job = jobs[name]
                 self.assertEqual(job["permissions"].get("id-token"), "write")
+                self.assertEqual(job["environment"].get("name"), "pypi")
                 publish_step = next(
                     step
                     for step in job["steps"]
                     if step.get("uses", "").startswith("pypa/gh-action-pypi-publish@")
                 )
                 self.assertNotIn("password", publish_step.get("with", {}))
+                self.assertNotIn("attestations", publish_step.get("with", {}))
+
+        workflow_text = (ROOT / ".github/workflows/release.yml").read_text()
+        self.assertIn("vars.PYPI_NEW_PROJECTS == 'true'", workflow_text)
+        self.assertIn("${{ secrets.PYPI_API_TOKEN }}", workflow_text)
 
     def test_419_server_products_are_built_and_verified_separately(self):
         jobs = workflow("release.yml")["jobs"]
