@@ -62,6 +62,10 @@ PYPI_PLATFORMS_BY_VERSION = {
         "sparkless-testing": {"any"},
         "sparkless": {"any"},
     },
+    "4.20.0": {
+        "sparkless-testing": {"any"},
+        "sparkless": {"any"},
+    },
 }
 SPLIT_PYPI_PLATFORMS = {
     "sparkless": {"any"},

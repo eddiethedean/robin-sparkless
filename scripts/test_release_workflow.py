@@ -462,6 +462,14 @@ done
             if step.get("name") == "Publish to crates.io in dependency order"
         )
         self.assertIn("last_new_publish", script)
+        self.assertIn("crate_version_published", script)
+        self.assertIn(
+            "https://crates.io/api/v1/crates/${crate}/${crate_version}", script
+        )
+        self.assertLess(
+            script.index('if crate_version_published "$crate"; then'),
+            script.index("wait_seconds=$((last_new_publish + 300 - now))"),
+        )
         self.assertIn('sleep "$wait_seconds"', script)
         self.assertIn("last_new_publish + 300", script)
         self.assertIn("429 Too Many Requests", script)

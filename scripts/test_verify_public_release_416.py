@@ -16,14 +16,18 @@ from verify_public_release_416 import (
 
 
 def release_metadata(project, version="4.16.0"):
-    split = project == "sparkless-native" or version == "4.18.1"
+    split = project == "sparkless-native" or (
+        project == "sparkless" and tuple(map(int, version.split("."))) >= (4, 18, 1)
+    )
     suffixes = sorted(
         (SPLIT_PYPI_PLATFORMS if split else PYPI_PLATFORMS_BY_VERSION[version])[project]
     )
     wheel_project = project.replace("-", "_")
     wheel_python_abi = (
         "py3-none"
-        if project == "sparkless-server-bin" or (split and project == "sparkless")
+        if project in {"sparkless-server-bin", "sparkless-testing"} or (
+            split and project == "sparkless"
+        )
         else "cp311-abi3"
         if split
         else "cp38-abi3"
@@ -88,6 +92,14 @@ class VerifyPublicRelease416Test(unittest.TestCase):
     def test_accepts_the_419_backend_independent_testing_distribution(self):
         metadata = release_metadata("sparkless-testing", "4.19.0")
         validate_pypi_release(metadata, "sparkless-testing", version="4.19.0")
+
+    def test_accepts_the_420_backend_independent_testing_distribution(self):
+        metadata = release_metadata("sparkless-testing", "4.20.0")
+        validate_pypi_release(metadata, "sparkless-testing", version="4.20.0")
+
+    def test_accepts_the_420_universal_api_distribution(self):
+        metadata = release_metadata("sparkless", "4.20.0")
+        validate_pypi_release(metadata, "sparkless", version="4.20.0")
 
     def test_accepts_the_staged_417_server_binary_platforms(self):
         metadata = release_metadata("sparkless-server-bin", "4.17.0")
