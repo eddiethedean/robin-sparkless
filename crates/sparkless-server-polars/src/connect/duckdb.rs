@@ -616,9 +616,24 @@ fn sql_expression_nullability(
             if matches!(operator.as_str(), "/" | "%") {
                 Some(true)
             } else {
+                let literal_cast_may_return_null = matches!(
+                    operator.as_str(),
+                    "=" | "!=" | "<>" | ">" | ">=" | "<" | "<="
+                ) && match (
+                    sql_expression_literal_type(left),
+                    sql_expression_literal_type(right),
+                ) {
+                    (Some(left_type), Some(right_type)) => {
+                        (is_numeric_sql_type(&left_type) && matches!(&right_type, DataType::String))
+                            || (matches!(&left_type, DataType::String)
+                                && is_numeric_sql_type(&right_type))
+                    }
+                    _ => false,
+                };
                 Some(
                     sql_expression_nullability(left, source_schema)?
-                        || sql_expression_nullability(right, source_schema)?,
+                        || sql_expression_nullability(right, source_schema)?
+                        || literal_cast_may_return_null,
                 )
             }
         }
@@ -635,6 +650,25 @@ fn sql_expression_nullability(
         ),
         ExpressionShape::Composite => None,
     }
+}
+
+fn sql_expression_literal_type(expression: &SqlExpression) -> Option<DataType> {
+    matches!(&expression.shape, ExpressionShape::Literal)
+        .then(|| sql_literal_type(&expression.sql))
+        .flatten()
+}
+
+fn is_numeric_sql_type(data_type: &DataType) -> bool {
+    matches!(
+        data_type,
+        DataType::Byte
+            | DataType::Short
+            | DataType::Integer
+            | DataType::Long
+            | DataType::Float
+            | DataType::Double
+            | DataType::Decimal(_, _)
+    )
 }
 
 fn normalize_sql_output_schema(
@@ -3750,7 +3784,8 @@ mod tests {
     use super::validate_sql_query_shape;
     use super::{
         DuckDbConnectExecution, DuckDbConnectSession, cast_sql_numeric_string,
-        render_connect_expression_string, simple_insert, sql_numeric_binary_type,
+        normalize_sql_output_schema, render_connect_expression_string, simple_insert,
+        sql_numeric_binary_type,
     };
     use robin_sparkless_core::DataType;
     use robin_sparkless_core::engine::CancellationToken;
@@ -3843,6 +3878,32 @@ mod tests {
                 "expected unsupported SQL shape to be rejected: {sql}"
             );
         }
+    }
+
+    #[test]
+    fn sql_numeric_string_literal_comparison_is_nullable() {
+        let database = TempDatabase::new();
+        let owner = Arc::new(
+            DuckDbExecutionOwner::open(DuckDbExecutionOwnerConfig::Local {
+                database_path: database.0.clone(),
+            })
+            .expect("local DuckDB execution owner should open"),
+        );
+        let session = DuckDbConnectSession {
+            owner: owner.clone(),
+        };
+        let sql = "SELECT 1.2 = '1.24' AS numeric_string, '1.24' = 1.2 AS string_numeric, 1.2 = 1.24 AS numeric_numeric";
+        let cancellation = CancellationToken::new();
+        let actual = owner
+            .describe_query(sql, &cancellation)
+            .expect("DuckDB should describe literal comparisons");
+        let schema = normalize_sql_output_schema(&session, sql, actual, &cancellation)
+            .expect("SQL schema should normalize");
+        let fields = schema.logical_fields();
+
+        assert!(fields[0].nullable);
+        assert!(fields[1].nullable);
+        assert!(!fields[2].nullable);
     }
 
     #[test]
