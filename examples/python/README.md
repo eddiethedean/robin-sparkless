@@ -1,9 +1,10 @@
 # Python examples
 
-Runnable examples for the **Sparkless** Python package. Install first:
+Run these examples from the repository root with Sparkless 4.20.0. Start in a
+Python 3.11 or newer virtual environment.
 
 ```bash
-pip install "sparkless==4.20.0"
+python -m pip install "sparkless==4.20.0"
 ```
 
 | Script | Description |
@@ -16,7 +17,7 @@ pip install "sparkless==4.20.0"
 | [test_udf_example.py](test_udf_example.py) | Typed scalar Python UDF and comparison filter |
 | [test_local_contract_example.py](test_local_contract_example.py) | Local RDD and bounded compatibility behavior |
 
-Run scripts:
+## Run locally
 
 ```bash
 python examples/python/basic_usage.py
@@ -25,7 +26,9 @@ python -m pip install "sparkless[testing]==4.20.0"
 python -m pytest examples/python/test_dual_mode_example.py -v
 ```
 
-Install the base server and its matching Connect client:
+## Run over Spark Connect
+
+Install the base server and its matching Connect client.
 
 ```bash
 python -m pip install "sparkless-server[connect]==4.20.0"
@@ -42,12 +45,14 @@ client because the Connect server does not expose file readers or writes.
 
 See [docs/python_getting_started.md](../../docs/python_getting_started.md) and [docs/TESTING_GUIDE.md](../../docs/TESTING_GUIDE.md).
 
-Use the adjacent `conftest.py` to activate `sparkless_testing.plugin`. To check
-all pytest examples on real Spark (Java and the appropriate extra required):
+## Run the same pytest examples on PySpark
+
+The adjacent `conftest.py` loads `sparkless_testing.plugin`. Use a separate
+virtual environment and a JDK 17 installation for the PySpark 3.5 profile.
 
 ```bash
 python -m pip install "sparkless[testing,pyspark]==4.20.0"
-SPARKLESS_TEST_MODE=pyspark python -m pytest examples/python -v -s
+SPARKLESS_TEST_MODE=pyspark SPARKLESS_PYSPARK_COMPAT=3.5 python -m pytest examples/python -v -s
 ```
 
 The identity test unwraps the plugin's JDBC session adapter and verifies the

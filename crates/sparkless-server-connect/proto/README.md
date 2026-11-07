@@ -7,7 +7,8 @@ verify them from this directory with `shasum -a 256 -c SHA256SUMS`. The hashes a
 [4.18 protocol research note](../../../docs/plans/sparkless-server/CONNECT_PROTOCOL_RESEARCH.md#frozen-418-client-and-protocol-baseline).
 The matching Apache-2.0 license is included as `LICENSE-Apache-2.0`.
 
-`build.rs` compiles the checked-in sources only when the server's `connect` feature is enabled.
+The transport crate’s [build script](../build.rs) compiles the checked-in sources. The
+server products include this crate when their `connect` feature is enabled.
 It uses the pinned vendored `protoc`, Tonic/Prost generator, and descriptor output; generated
 Rust bindings stay in Cargo's `OUT_DIR` and are not hand-edited. The generated service uses a
 descriptor-aware wire preflight before Prost allocates request messages, then rechecks decoded

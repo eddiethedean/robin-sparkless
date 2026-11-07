@@ -1,11 +1,17 @@
 # sparkless-server-polars
 
-Shared HTTP and Spark Connect service implementation composed with the existing
-Polars engine. Base server consumers use `sparkless-server`; the DuckDB product
-uses `sparkless-server-duckdb`, which enables this adapter's optional source
-feature. The base product does not expose a feature that changes its identity.
+Shared Sparkless service implementation for HTTP SQL and Spark Connect. It
+adapts the Polars engine to the server contracts and provides optional DuckDB
+integration through the `duckdb-source` feature.
 
-Spark Connect protocol definitions are vendored under `proto/spark/connect` from
-Apache Spark tag `v4.0.5` and generated for Connect builds. The public listener,
-session, operation, readiness, and shutdown contracts are shared by both
-products. Execution still uses Polars in 4.19.
+| Product | Execution and data sources |
+| --- | --- |
+| [`sparkless-server`](https://crates.io/crates/sparkless-server) | Polars |
+| [`sparkless-server-duckdb`](https://crates.io/crates/sparkless-server-duckdb) | Polars by default, read-only DuckDB sources, and optional DuckDB execution for Spark Connect |
+
+The product crates choose which transports and capabilities to expose. The
+`sparkless-server-connect` crate owns the vendored Apache Spark 4.0.5 protocol
+definitions and generates the gRPC bindings for Connect builds.
+
+[Server support matrix](https://robin-sparkless.readthedocs.io/en/latest/SUPPORT_MATRIX/) ·
+[DuckDB execution guide](https://robin-sparkless.readthedocs.io/en/latest/DUCKDB_EXECUTION/)

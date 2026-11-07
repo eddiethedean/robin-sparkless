@@ -5,6 +5,10 @@ Sparkless or PySpark. Install `sparkless[testing]` when testing a Sparkless
 application, or install `sparkless-testing` directly for a suite that selects its
 backend independently.
 
+```bash
+python -m pip install "sparkless[testing]==4.20.0"
+```
+
 Add this to your suite's root `conftest.py` to load the fixtures and backend
 markers:
 
@@ -12,10 +16,10 @@ markers:
 pytest_plugins = ["sparkless_testing.plugin"]
 ```
 
-The package does not import Sparkless, PySpark, a native engine, or a JVM until a
-backend-dependent helper is called. Follow the
-[testing guide](https://robin-sparkless.readthedocs.io/en/latest/TESTING_GUIDE/)
-to install an engine and run the same test on both backends.
+Use the `spark` fixture in your tests. It selects Sparkless by default. To
+run the same tests on a local PySpark installation, set `SPARKLESS_TEST_MODE=pyspark`.
+The [testing guide](https://robin-sparkless.readthedocs.io/en/latest/TESTING_GUIDE/)
+covers PySpark and Java setup and the compatibility profiles.
 
 Use `compare_dataframes()` for structured row, ordered-column, and schema
 results, or `assert_dataframes_equal()` to fail a test on any difference. Schema
@@ -26,4 +30,4 @@ empty `data` list. See the
 
 The published 4.19.0 package had the schema comparison defect in
 [#1746](https://github.com/eddiethedean/robin-sparkless/issues/1746). Version
-4.20.0 fixes it; use the current package for schema-sensitive comparisons.
+4.20.0 fixes schema comparison for empty results and nested types.

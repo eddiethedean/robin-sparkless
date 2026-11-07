@@ -12,10 +12,10 @@ Spark cluster.
 
 ## Install
 
-Requires CPython **3.11–3.14** for the published native wheels. Package
-metadata declares Python 3.11 or newer. See the
+Install in a virtual environment with Python **3.11 or newer**. Sparkless
+installs the matching `sparkless-native` engine automatically. Check the
 [platform table](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/INSTALLATION.md#platforms-and-build-features)
-for architectures and operating system floors.
+for native wheel targets and source build requirements.
 
 ```bash
 python -m pip install "sparkless==4.20.0"
@@ -32,20 +32,22 @@ df.filter(F.col("age") >= 30).select("name").show()
 spark.stop()
 ```
 
-Use common transformations, joins, aggregations, windows, SQL, and file I/O.
-For tests, install `sparkless[testing]` to get the backend-independent
-`sparkless_testing` helpers. They let one pytest suite run with Sparkless or real
-PySpark.
+The example prints Bob. Use the same session for joins, aggregations, windows,
+SQL, and file I/O. Sparkless runs on one machine and implements a subset of
+PySpark. See [compatibility and limitations](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/BEFORE_YOU_ADOPT.md).
 
-Sparkless runs on one machine and implements a subset of PySpark behavior.
-See [Before you adopt](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/BEFORE_YOU_ADOPT.md)
-for compatibility and limitations.
+## Related packages
 
-### Supported platforms
+| Workflow | Install |
+| --- | --- |
+| Run the same pytest suite with Sparkless and local PySpark | `sparkless[testing]==4.20.0` |
+| Start a local Polars server and a Spark Connect session | `sparkless-server[connect]==4.20.0` |
+| Use the DuckDB server product | `sparkless-server-duckdb[connect]==4.20.0` |
+| Connect to a server you already run | `sparkless-connect[client]==4.20.0` |
 
-Prebuilt wheels cover Linux, macOS, and Windows. See the
-[platform guide](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/python_getting_started.md#supported-platforms)
-and [PyPI files](https://pypi.org/project/sparkless/#files) for your release.
+The server packages have their own wheel targets. Check the
+[installation matrix](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/INSTALLATION.md#choose-a-package)
+before adding a server dependency.
 
 ## Learn more
 
@@ -54,7 +56,7 @@ and [PyPI files](https://pypi.org/project/sparkless/#files) for your release.
 | [Getting started](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/python_getting_started.md) | Installation, extras, and examples |
 | [Python API](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/PYTHON_API_REFERENCE.md) | DataFrames, functions, SQL, and Arrow export |
 | [Testing](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/TESTING_GUIDE.md) | Run the same tests with Sparkless and PySpark |
-| [Spark Connect](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/SPARK_CONNECT.md) | Native server setup and the 4.19 supported plan subset |
+| [Spark Connect](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/SPARK_CONNECT.md) | Native server setup and supported plans |
 
 [Full documentation](https://robin-sparkless.readthedocs.io/) ·
 [Source and contributing](https://github.com/eddiethedean/robin-sparkless/blob/main/CONTRIBUTING.md) ·

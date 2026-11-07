@@ -1,10 +1,24 @@
-# Spark Connect 4.18 contract fixtures
+# Spark Connect fixtures and integration checks
 
-This corpus is pinned to **`pyspark-client==4.0.5`**, with the matching Apache Spark **4.0.5** protocol source. It captures protobuf requests from unmodified public Python APIs and the client's own reattachment/release encoder. The recording stub stops before a server executes a plan. These files establish client wire shapes; they do not claim Sparkless interoperability or server behavior.
+Run these commands from the repository root. The 4.20 checks use
+`pyspark-client==4.0.5` and the matching Apache Spark 4.0.5 protocol.
 
-The native `connect` feature compiles Apache Spark's ten unchanged protocol sources vendored in
-`crates/sparkless-server-polars/proto/spark/connect/`. Their reviewed source hashes and selected client
-behavior are recorded in `docs/plans/sparkless-server/CONNECT_PROTOCOL_RESEARCH.md`. The Rust
+| To check | Start here |
+| --- | --- |
+| Client wire shapes and the base Connect listener | [Protocol fixtures and base smoke](#protocol-fixtures-and-base-smoke) |
+| DuckDB execution, writes, and restart behavior | [Phase 4.20 DuckDB execution smoke](#phase-420-duckdb-execution-smoke) |
+| Result and schema parity against Apache Spark | [Phase 4.20 Spark result and schema comparison](#phase-420-spark-result-and-schema-comparison) |
+
+See the [server support matrix](../../docs/SUPPORT_MATRIX.md) for the release
+contract and the [Spark Connect guide](../../docs/SPARK_CONNECT.md) for usage.
+
+## Protocol fixtures and base smoke
+
+The fixtures capture protobuf requests from public Python APIs and the client’s
+reattachment and release encoder. The recording stub captures requests before
+plan execution. The Connect transport builds from the
+[vendored Apache Spark protocol sources](../../crates/sparkless-server-connect/proto/README.md).
+The Rust
 service tests decode the checked-in `execute-range-filter-count.pb` fixture and cover malformed
 session IDs, duplicate operation IDs, session-generation/tombstone behavior, structural protobuf
 limits, and a real gRPC listener's inbound-size rejection. Run them with:
@@ -13,19 +27,17 @@ limits, and a real gRPC listener's inbound-size rejection. Run them with:
 cargo test -p sparkless-server-polars --no-default-features --features connect connect::tests --lib
 ```
 
-These are slice 2 transport and identity tests. They do not exercise native plan translation or
-successful Spark Connect results.
-
-Slice 4's focused public-client smoke starts a development gRPC listener and runs the locked,
-unmodified client against it. In one terminal, start the listener:
+For an end-to-end client check, start the development gRPC listener in one terminal:
 
 ```sh
 cargo run -p sparkless-server --example connect-dev-server --no-default-features --features connect
 ```
 
-In another terminal, using the environment created by the fixture setup above, run:
+In another terminal, create the locked client environment and run the smoke:
 
 ```sh
+uv venv --python 3.11 /tmp/sparkless-connect-client-py311
+uv pip sync --python /tmp/sparkless-connect-client-py311/bin/python tests/connect/client-py311.lock
 /tmp/sparkless-connect-client-py311/bin/python tests/connect/smoke_public_client.py
 ```
 
@@ -61,6 +73,7 @@ dependencies installed:
 
 ```sh
 cargo build -p sparkless-server-duckdb --no-default-features --features http,connect
+uv venv --python 3.11 /tmp/sparkless-phase420-client-py311
 uv pip sync --python /tmp/sparkless-phase420-client-py311/bin/python \
   tests/connect/client-py311.lock tests/connect/duckdb-source-py311.lock
 PYTHONPATH=python/server-duckdb:python/connect \
@@ -102,7 +115,7 @@ supported server platform and exact package.
 The local 420-01 probe starts both server products in default mode, starts the DuckDB product
 with a local DuckDB execution owner, fetches live capabilities, and verifies that they match the
 readiness record. It also requires the base product, missing-owner, and missing-Connect cases to
-fail before readiness. Build the base product and use the DuckDB candidate binary:
+fail before readiness. Build the base product and use the 4.20 DuckDB server binary:
 
 ```sh
 cargo build --locked -p sparkless-server --no-default-features --features http,connect
@@ -382,7 +395,7 @@ PYTHONPATH=python/server-duckdb:python/connect \
   --output target/connect-phase420-v38
 ```
 
-The [original V38 matrix](../../docs/plans/sparkless-server/evidence/phase-420-duckdb-v38-load-local-summary.json) is pre-fix evidence: its 5-second network send-stall deadline rejected paced non-reattachable streams across active limits 2/4/8. The candidate now allows 30 seconds for network send-credit replenishment and retains the 5-second reattachable response-ACK timeout. Release-profile local-owner and shared-Quack cohorts at eight clients/active_operations=16 each completed concurrent and final 1M-row readers at 100 ms pacing, with zero capacity rejections, clean health probes, and graceful shutdown. At active_operations=8, eight workload clients plus the extra slow reader caused one compute-admission rejection; the final standalone slow reader still completed. See the [post-fix V38 summary](../../docs/plans/sparkless-server/evidence/phase-420-duckdb-v38-backpressure-release-local-summary.json) and linked raw reports. This closes the reproduced send-stall defect on the tested host. A separate [Quack lifecycle probe](../../docs/plans/sparkless-server/evidence/phase-420-quack-execution-final-release-local.json) now measures four concurrent Connect reads during owner loss; supported capacity, resource-budget, cross-platform, cleanup, and durability acceptance remain open.
+The [original V38 matrix](../../docs/plans/sparkless-server/evidence/phase-420-duckdb-v38-load-local-summary.json) is pre-fix evidence: its 5-second network send-stall deadline rejected paced non-reattachable streams across active limits 2/4/8. The tested 4.20 build allows 30 seconds for network send-credit replenishment and retains the 5-second reattachable response-ACK timeout. Release-profile local-owner and shared-Quack cohorts at eight clients/active_operations=16 each completed concurrent and final 1M-row readers at 100 ms pacing, with zero capacity rejections, clean health probes, and graceful shutdown. At active_operations=8, eight workload clients plus the extra slow reader caused one compute-admission rejection; the final standalone slow reader still completed. See the [post-fix V38 summary](../../docs/plans/sparkless-server/evidence/phase-420-duckdb-v38-backpressure-release-local-summary.json) and linked raw reports. This closes the reproduced send-stall defect on the tested host. A separate [Quack lifecycle probe](../../docs/plans/sparkless-server/evidence/phase-420-quack-execution-final-release-local.json) now measures four concurrent Connect reads during owner loss; supported capacity, resource-budget, cross-platform, cleanup, and durability acceptance remain open.
 
 The bounded DuckDB read pool addresses a second bottleneck found in the active-16 Quack cohort: short queries waited up to 27.75 seconds while a non-reattachable reader was blocked sending. With one serialized write/receipt connection, up to four concurrent read connections, and at most 16 queued reads, the final local and Quack cohorts completed the same paced streams without capacity rejections. Quack small-count p99 fell to 167 ms (99.4% below the pre-pool cohort) and throughput increased from 12.4 to 79.2 ops/s. The [read-pool summary](../../docs/plans/sparkless-server/evidence/phase-420-duckdb-v38-read-pool-local-summary.json) links final-binary reports and includes local RSS observations. These one-host measurements have no accepted resource budget and do not close cross-platform or release checks.
 
@@ -392,7 +405,7 @@ For the shared Quack owner, replace `--duckdb-local-owner` with `--quack-owner-b
 python tests/connect/run_slice8_benchmarks.py \
   --client-python /tmp/sparkless-phase420-client-py311/bin/python \
   --baseline-bin /path/to/published-4.19.0/sparkless-server \
-  --server-bin /path/to/candidate/sparkless-server \
+  --server-bin /path/to/4.20.0/sparkless-server \
   --profile 419 \
   --concurrency 1,4,8,16 \
   --duration-seconds 60 \
@@ -415,7 +428,7 @@ for active in 2 4 8; do
   python tests/connect/run_slice8_benchmarks.py \
     --client-python /tmp/sparkless-phase420-client-py311/bin/python \
     --baseline-bin /path/to/published-4.19.0/sparkless-server \
-    --server-bin /path/to/candidate/sparkless-server \
+    --server-bin /path/to/4.20.0/sparkless-server \
     --profile 419 \
     --concurrency 16 \
     --duration-seconds 60 \
@@ -434,7 +447,7 @@ The HTTP runner starts fresh baseline and candidate servers in three alternating
 ```sh
 python tests/connect/benchmark_phase420_http.py \
   --baseline-bin /path/to/published-4.19.0/sparkless-server \
-  --server-bin /path/to/candidate/sparkless-server \
+  --server-bin /path/to/4.20.0/sparkless-server \
   --output /tmp/phase420-http
 ```
 

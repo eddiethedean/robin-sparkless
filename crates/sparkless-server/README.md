@@ -12,17 +12,17 @@ cargo build --release -p sparkless-server --no-default-features --features conne
 cargo build --release -p sparkless-server --no-default-features --features http,connect
 ```
 
-Use `cargo install sparkless-server` for the base executable. Use
-`cargo install sparkless-server-duckdb` to install the separate product with
-read-only DuckDB sources and optional DuckDB Connect execution. Polars remains
-the default backend for both products.
-
-For an application using the 4.20 Rust API, install the matching client and
-server release together:
+Install the 4.20.0 base executable with both HTTP and Spark Connect enabled:
 
 ```sh
-cargo install sparkless-server --version 4.20.0 --locked
+cargo install sparkless-server --version 4.20.0 --locked --features connect
+sparkless-server serve
 ```
+
+Cargo enables HTTP by default. To install the DuckDB server instead, use
+`sparkless-server-duckdb` with the same version and features. Both products
+default to Polars. The DuckDB product adds read-only DuckDB sources and
+optional DuckDB execution for supported Spark Connect plans.
 
 See the [Python package and platform matrix](../../docs/INSTALLATION.md),
 [deployment runbook](../../docs/PRODUCTION.md), and

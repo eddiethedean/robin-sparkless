@@ -2,9 +2,6 @@
 
 **PySpark-style DataFrames. Native Rust execution. No JVM.**
 
-> **Release candidate:** 4.20.0 has not been tagged or published yet. Use the
-> latest published version until the 4.20.0 packages are available.
-
 [![CI](https://github.com/eddiethedean/robin-sparkless/actions/workflows/ci.yml/badge.svg)](https://github.com/eddiethedean/robin-sparkless/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/sparkless.svg)](https://pypi.org/project/sparkless/)
 [![Documentation](https://readthedocs.org/projects/robin-sparkless/badge/?version=latest)](https://robin-sparkless.readthedocs.io/en/latest/)
@@ -16,10 +13,9 @@ starting a Spark cluster.
 
 ## Get started
 
-Requires CPython **3.11–3.14** for the published native wheels. Package metadata
-declares Python 3.11 or newer, so later Python versions may install from source
-when a compatible native wheel is not available. See the
-[platform table](docs/INSTALLATION.md#platforms-and-build-features).
+Install Sparkless 4.20.0 in a Python **3.11+** virtual environment. See the
+[platform table](docs/INSTALLATION.md#platforms-and-build-features) for native
+wheel targets and source build requirements.
 
 ```bash
 python -m pip install "sparkless==4.20.0"
@@ -34,31 +30,33 @@ df.filter(F.col("age") >= 30).select("name").show()
 spark.stop()
 ```
 
-Sparkless supports common transformations, joins, aggregations, windows, SQL,
-and file I/O. The [testing guide](docs/TESTING_GUIDE.md) shows how to run the
-same pytest tests with Sparkless and real PySpark.
+The example prints Bob. Sparkless runs on one machine and implements a subset
+of PySpark. Check [compatibility and limitations](docs/BEFORE_YOU_ADOPT.md)
+before relying on it for your workload.
 
-It runs on one machine and implements a subset of PySpark behavior. Read
-[Before you adopt](docs/BEFORE_YOU_ADOPT.md) for compatibility and limitations.
+## Choose a workflow
 
-## Explore
-
-| Guide | What you'll find |
+| I want to… | Start here |
 | --- | --- |
-| [Python getting started](docs/python_getting_started.md) | Installation, platforms, extras, and examples |
-| [Python API](docs/PYTHON_API_REFERENCE.md) | DataFrames, functions, SQL, and Arrow export |
-| [Testing](docs/TESTING_GUIDE.md) | One test suite with Sparkless and PySpark |
-| [Spark Connect server](docs/SPARK_CONNECT.md) | Run the pinned PySpark Connect client against the supported Sparkless plan subset |
-| [DuckDB table sources](docs/DUCKDB_SOURCE.md) | Read a local DuckDB test database through Spark Connect |
-| [DuckDB Connect execution](docs/DUCKDB_EXECUTION.md) | Execute the documented Spark Connect subset in DuckDB |
-| [4.20 migration](docs/MIGRATION_4_20.md) | Keep the default backend or opt into DuckDB execution |
-| [4.19 migration](docs/python_migration.md#from-sparkless-418-to-419) | Choose the split packages and update imports |
-| [Rust quickstart](docs/QUICKSTART.md) | Embed the `robin-sparkless` engine |
+| Run Python DataFrames and SQL locally | [Python API](docs/PYTHON_API_REFERENCE.md) · [Runnable examples](examples/python/README.md) |
+| Run one pytest suite with Sparkless and PySpark | [Testing guide](docs/TESTING_GUIDE.md) |
+| Point a PySpark Connect client at a local server | [Spark Connect guide](docs/SPARK_CONNECT.md) |
+| Query a server over HTTP | [HTTP quickstart](docs/HTTP_API.md#start-and-query) |
+| Embed the engine in Rust | [Rust quickstart](docs/QUICKSTART.md) |
 
-Full documentation: [Read the Docs](https://robin-sparkless.readthedocs.io/en/latest/).
+## What’s new in 4.20.0
+
+Sparkless 4.20.0 adds optional DuckDB execution for supported Spark Connect plans
+in `sparkless-server-duckdb`. Both server products default to Polars.
+
+[DuckDB execution guide](docs/DUCKDB_EXECUTION.md) ·
+[Read-only DuckDB sources](docs/DUCKDB_SOURCE.md) ·
+[Migration guide](docs/MIGRATION_4_20.md) ·
+[Release evidence](docs/RELEASE_EVIDENCE.md)
 
 ## Contribute
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and checks. Report bugs in
 [GitHub Issues](https://github.com/eddiethedean/robin-sparkless/issues).
+[Full documentation](https://robin-sparkless.readthedocs.io/en/latest/) ·
 [Changelog](CHANGELOG.md) · [Release guide](docs/RELEASING.md) · [MIT license](LICENSE).

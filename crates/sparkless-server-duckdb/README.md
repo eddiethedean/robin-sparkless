@@ -21,7 +21,13 @@ send table names and cannot select database paths, credentials, or extension bin
 See the [DuckDB execution guide](../../docs/DUCKDB_EXECUTION.md) for backend
 selection, transaction receipts, supported Connect plans, and operating limits.
 
-For the Python Spark Connect client, install the same release version with
-`pip install "sparkless-server-duckdb[connect]==4.20.0"`. See the
+Install the 4.20.0 executable with both transports enabled:
+
+```sh
+cargo install sparkless-server-duckdb --version 4.20.0 --locked --features connect
+```
+
+For the Python launcher and pinned Spark Connect client, run
+`python -m pip install "sparkless-server-duckdb[connect]==4.20.0"`. See the
 [DuckDB quickstart](../../docs/DUCKDB_SOURCE.md), [deployment runbook](../../docs/PRODUCTION.md),
 and [release evidence](../../docs/RELEASE_EVIDENCE.md).
