@@ -1,11 +1,10 @@
-# DuckDB Connect execution (4.20.0 candidate)
+# DuckDB Connect execution (4.20.0)
 
-The optional `sparkless-server-duckdb` candidate runs the documented Spark
+The published `sparkless-server-duckdb` product runs the documented Spark
 Connect SQL and DataFrame subset in DuckDB. Polars remains the default backend.
-This is a single-node service, not a general Spark replacement. The 4.20.0
-release has not been tagged or published. Check the [candidate support
-contract](SUPPORT_MATRIX.md) and [release evidence](RELEASE_EVIDENCE.md) before
-enabling it.
+This is a single-node service, not a general Spark replacement. Check the
+[4.20.0 support contract](SUPPORT_MATRIX.md) and [release evidence](RELEASE_EVIDENCE.md)
+before enabling it.
 
 The adapter targets the unmodified Spark Connect 4.0.5 client and an Apache
 Spark 4.0.5 reference. Unsupported operations fail explicitly; they never fall

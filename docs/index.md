@@ -65,7 +65,10 @@ finally:
 
 </div>
 
-## 4.20.0 candidate
+## Current release: 4.20.0
+
+Version 4.20.0 is published. See the [release record](RELEASE_EVIDENCE.md) for
+the verified source tag and public artifacts.
 
 - **Execute Connect plans in DuckDB.** Opt in on the separate DuckDB server;
   Polars remains the default and unsupported plans fail explicitly.

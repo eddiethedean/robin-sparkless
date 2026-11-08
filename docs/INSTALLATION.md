@@ -1,8 +1,8 @@
 # Install Sparkless 4.20.0
 
-> **Release candidate:** these instructions describe 4.20.0, which has not
-> been tagged or published yet. Its exact packages will be available after the
-> release is published.
+Version 4.20.0 is published on PyPI. The package and platform tables below
+describe the available release artifacts; see the [release evidence](RELEASE_EVIDENCE.md)
+for the tagged source and validation results.
 
 Create a Python 3.11 virtual environment. Use its Python executable for both
 installation and examples.

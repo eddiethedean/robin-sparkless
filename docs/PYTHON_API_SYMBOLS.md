@@ -865,10 +865,6 @@ No runtime docstring. See the API contracts and support matrix before relying on
 
 No runtime docstring. See the API contracts and support matrix before relying on this symbol.
 
-### `delta(self, /, path)`
-
-No runtime docstring. See the API contracts and support matrix before relying on this symbol.
-
 ### `format(self, /, fmt)`
 
 PySpark: format("parquet"|"csv"|"json"|"delta"). Used by load().

@@ -7,9 +7,11 @@ Review the [compatibility policy](docs/SUPPORT.md) before upgrading across relea
 
 ## [Unreleased]
 
-## [4.20.0] - 2026-11-06
+## [4.20.0] - 2026-11-08
 
-Candidate release; not yet tagged or published.
+Published from tag [`v4.20.0`](https://github.com/eddiethedean/robin-sparkless/tree/v4.20.0).
+The exact-source CI, PySpark 4 oracle, and release workflow passed; see the
+[release evidence](docs/RELEASE_EVIDENCE.md).
 
 ### Added
 

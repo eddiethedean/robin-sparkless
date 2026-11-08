@@ -21,6 +21,9 @@ wheel targets and source build requirements.
 python -m pip install "sparkless==4.20.0"
 ```
 
+Sparkless 4.20.0 is published. See the [release evidence](docs/RELEASE_EVIDENCE.md)
+for the tagged source, CI results, and published Python, Rust, and container artifacts.
+
 ```python
 from sparkless.sql import SparkSession, functions as F
 

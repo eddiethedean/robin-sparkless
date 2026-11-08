@@ -1,11 +1,10 @@
-# 4.20.0 candidate support contract
+# 4.20.0 support contract
 
-This candidate defines the proposed public behavior for 4.20.0; the release has
-not been tagged or published. “Implemented” describes a bounded API, not all
-PySpark semantics. “Behavior-tested” means regression or reference coverage
-exists. “Unsupported” is outside the contract; “unknown” requires workload
-validation. See the [package and platform matrix](INSTALLATION.md) and
-[release evidence](RELEASE_EVIDENCE.md).
+This published contract defines the supported 4.20.0 behavior. “Implemented”
+describes a bounded API, not all PySpark semantics. “Behavior-tested” means
+regression or reference coverage exists. “Unsupported” is outside the contract;
+“unknown” requires workload validation. See the [package and platform matrix](INSTALLATION.md)
+and [release evidence](RELEASE_EVIDENCE.md).
 
 | Capability | Local Python | Rust embedding | Base server | DuckDB server | Spark Connect |
 | --- | --- | --- | --- | --- | --- |

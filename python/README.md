@@ -21,6 +21,10 @@ for native wheel targets and source build requirements.
 python -m pip install "sparkless==4.20.0"
 ```
 
+Version 4.20.0 is the current published release. See the
+[release evidence](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/RELEASE_EVIDENCE.md)
+for its source tag and package inventories.
+
 ## Quick start
 
 ```python

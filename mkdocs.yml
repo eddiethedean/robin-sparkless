@@ -80,7 +80,7 @@ nav:
     - Test with Sparkless and PySpark: TESTING_GUIDE.md
     - File pipeline tutorial: PIPELINE_TUTORIAL.md
     - 4.19 Rust and package changes: MIGRATION_4_19.md
-    - 4.20 candidate migration: MIGRATION_4_20.md
+    - 4.20 migration: MIGRATION_4_20.md
     - Persistence and tables: PERSISTENCE_GUIDE.md
     - Scalar UDFs: UDF_GUIDE.md
     - External catalogs: EXTERNAL_CATALOGS.md
@@ -110,7 +110,7 @@ nav:
   - Run a server:
     - Spark Connect quickstart: SPARK_CONNECT.md
     - Read DuckDB tables: DUCKDB_SOURCE.md
-    - DuckDB Connect execution (4.20 candidate): DUCKDB_EXECUTION.md
+    - DuckDB Connect execution (4.20.0): DUCKDB_EXECUTION.md
     - HTTP quickstart and API: HTTP_API.md
     - Python launcher API: SERVER_PYTHON_API.md
     - Deployment and operations: PRODUCTION.md

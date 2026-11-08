@@ -1,5 +1,59 @@
 # Release evidence
 
+## 4.20.0 public artifacts — 2026-11-08 UTC
+
+Tag [`v4.20.0`](https://github.com/eddiethedean/robin-sparkless/tree/v4.20.0)
+points to source commit
+[`27e76d4a9cbe19e91bb5c2e487b8f21b9182794b`](https://github.com/eddiethedean/robin-sparkless/commit/27e76d4a9cbe19e91bb5c2e487b8f21b9182794b).
+Exact-source [CI run 42486405710](https://github.com/eddiethedean/robin-sparkless/actions/runs/42486405710)
+and [PySpark 4 oracle run 42486513081](https://github.com/eddiethedean/robin-sparkless/actions/runs/42486513081)
+passed. The tag-triggered [Release run 42489896168](https://github.com/eddiethedean/robin-sparkless/actions/runs/42489896168)
+passed all 45 jobs, including release acceptance, platform builds, wheel and
+container smokes, and publication checks.
+
+The release workflow reused matching immutable PyPI files and used Trusted
+Publishing for existing projects. New PyPI projects use the repository
+`PYPI_API_TOKEN` secret when named in `PYPI_NEW_PROJECTS`; that fallback is
+covered by the local release workflow tests. Earlier tag attempts did not pass
+release acceptance: one found an already-published API wheel whose hash differed
+from a rebuilt file, and another exposed a macOS DuckDB shutdown-smoke assumption.
+The final run passed after the published-file reuse and shutdown checks were
+corrected.
+
+| PyPI project | Public 4.20.0 files verified |
+| --- | --- |
+| [sparkless](https://pypi.org/project/sparkless/4.20.0/#files) | Universal wheel and source archive |
+| [sparkless-native](https://pypi.org/project/sparkless-native/4.20.0/#files) | Eight platform wheels and source archive |
+| [sparkless-connect](https://pypi.org/project/sparkless-connect/4.20.0/#files) | Universal wheel and source archive |
+| [sparkless-testing](https://pypi.org/project/sparkless-testing/4.20.0/#files) | Universal wheel and source archive |
+| [sparkless-server](https://pypi.org/project/sparkless-server/4.20.0/#files) | Linux x86_64 and macOS arm64 wheels |
+| [sparkless-server-duckdb](https://pypi.org/project/sparkless-server-duckdb/4.20.0/#files) | Linux x86_64 and macOS arm64 wheels |
+
+This is 19 PyPI release files across six projects. All 17 first-party Rust
+crates are present at version 4.20.0:
+[spark-sql-parser](https://crates.io/crates/spark-sql-parser/4.20.0),
+[robin-sparkless-core](https://crates.io/crates/robin-sparkless-core/4.20.0),
+[robin-sparkless-plan](https://crates.io/crates/robin-sparkless-plan/4.20.0),
+[robin-sparkless-sql](https://crates.io/crates/robin-sparkless-sql/4.20.0),
+[robin-sparkless-delta](https://crates.io/crates/robin-sparkless-delta/4.20.0),
+[robin-sparkless-jdbc](https://crates.io/crates/robin-sparkless-jdbc/4.20.0),
+[robin-sparkless-jdbc-polars](https://crates.io/crates/robin-sparkless-jdbc-polars/4.20.0),
+[robin-sparkless-duckdb](https://crates.io/crates/robin-sparkless-duckdb/4.20.0),
+[robin-sparkless-polars](https://crates.io/crates/robin-sparkless-polars/4.20.0),
+[robin-sparkless](https://crates.io/crates/robin-sparkless/4.20.0),
+[sparkless-server-core](https://crates.io/crates/sparkless-server-core/4.20.0),
+[sparkless-server-runtime](https://crates.io/crates/sparkless-server-runtime/4.20.0),
+[sparkless-server-http](https://crates.io/crates/sparkless-server-http/4.20.0),
+[sparkless-server-connect](https://crates.io/crates/sparkless-server-connect/4.20.0),
+[sparkless-server-polars](https://crates.io/crates/sparkless-server-polars/4.20.0),
+[sparkless-server](https://crates.io/crates/sparkless-server/4.20.0), and
+[sparkless-server-duckdb](https://crates.io/crates/sparkless-server-duckdb/4.20.0).
+
+| Container image | Tag result |
+| --- | --- |
+| [`ghcr.io/eddiethedean/sparkless-server:v4.20.0`](https://github.com/eddiethedean/robin-sparkless/pkgs/container/sparkless-server) | Verified and smoke-tested; digest `sha256:3e697021514f5aa040e343461d734d19505d6893199a7721186b7c5cb2148c4d` |
+| [`ghcr.io/eddiethedean/sparkless-server-duckdb:v4.20.0`](https://github.com/eddiethedean/robin-sparkless/pkgs/container/sparkless-server-duckdb) | Verified and smoke-tested; digest `sha256:6c58495d97850c4add1f1031558d4adf335a52a1f7af2f1cb99c58ee2dbc3782` |
+
 ## 4.19.0 public artifacts — 2026-11-05 UTC
 
 Source tag [v4.19.0](https://github.com/eddiethedean/robin-sparkless/tree/v4.19.0)
