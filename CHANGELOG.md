@@ -7,6 +7,15 @@ Review the [compatibility policy](docs/SUPPORT.md) before upgrading across relea
 
 ## [Unreleased]
 
+### Documentation
+
+- Reconcile local, HTTP, Polars Connect and DuckDB execution contracts; correct
+  writer defaults, database option effects, provider write safety and stability guidance.
+- Add authored Python API contracts, SQL/file/error references, provider and
+  process-restart examples, recovery and container tutorials, and workflow-based navigation.
+- Register complete examples for executable checks, add SQLite/Rust guide validation,
+  and prepare browsable versioned Rust documentation with explicit hosted verification.
+
 ## [4.20.0] - 2026-11-08
 
 Published from tag [`v4.20.0`](https://github.com/eddiethedean/robin-sparkless/tree/v4.20.0).

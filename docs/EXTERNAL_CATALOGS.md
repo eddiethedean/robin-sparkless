@@ -113,6 +113,10 @@ alias `setExternalCatalogProvider(provider)`. Pass `None` to detach. Providers i
 `resolve_ownership(identifier)` and `resolve_table(identifier)`. Writable providers
 also implement `write_table_batches(request)`:
 
+The following is a contract fragment: it assumes an existing session and Delta
+table at `/data/orders`. For a complete disposable read/write example, start
+with the [provider tutorial](PROVIDER_TUTORIAL.md).
+
 ```python
 from sparkless.external_catalog import (
     ExternalCatalogOwnership,
@@ -162,21 +166,33 @@ read. PyArrow is required by Python write callbacks. Batches default to 10,000 r
 and 64 MiB; set
 `sparkless.writer.maxRowsPerBatch` and `sparkless.writer.maxBytesPerBatch` writer options
 to change these limits. A single row larger than the byte limit raises an error.
-For example, a provider can process only up to its row budget and then close the source:
+Consume and validate the complete input before committing. Reaching a budget is
+an error, not permission to commit a prefix. This contract fragment assumes a
+storage adapter whose `begin_stage`, `abort_stage` and `commit_and_build_receipt`
+implement staging, rollback of uncommitted work, and atomic commit:
 
 ```python
 def write_table_batches(self, request):
     rows = 0
+    stage = self.begin_stage(request.operation_id)
     try:
         for batch in request.batches:
+            if rows + batch.num_rows > self.row_limit:
+                raise ValueError("write exceeds provider row budget")
+            stage.write_batch(batch)
             rows += batch.num_rows
-            self.write_batch(batch)
-            if rows >= self.row_limit:
-                break
+    except BaseException:
+        self.abort_stage(stage)
+        raise
     finally:
         request.batches.close()
-    return self.commit_and_build_receipt(request.table)
+    return self.commit_and_build_receipt(stage, request.table)
 ```
+
+Commit runs only after the iterator is exhausted successfully. A commit exception
+can still mean an unknown outcome; retain the operation ID and reconcile storage
+before retrying. The [complete tutorial](PROVIDER_TUTORIAL.md) demonstrates a
+small bounded in-memory stage and verifies that rejected input changes no data.
 
 After committing through its storage backend, the callback must return
 `ExternalTableWriteResult(table=committed_descriptor, committed_version=version)`.
@@ -222,7 +238,7 @@ provider; detaching or stopping the Python session releases its provider referen
 
 ## Rust and Python API coverage
 
-Every public catalog operation introduced by this PR has a Python counterpart:
+The current catalog contract exposes the following Rust and Python operations:
 
 | Rust API or behavior | Python API |
 | --- | --- |
@@ -272,5 +288,7 @@ same limits in both languages.
 
 ## Availability
 
-This API is included in Sparkless `4.14.0`. Consumers on earlier releases must build
-from the corresponding source revision to use it.
+External catalog integration began in 4.14. The ownership/capability split,
+prepared Rust commits, and bounded batch-writer contract shown here require
+**4.19 or newer**. The examples target **4.20.0**. Earlier materialized-writer
+implementations must follow the [4.19 migration guide](MIGRATION_4_19.md#catalog-ownership-and-capabilities).

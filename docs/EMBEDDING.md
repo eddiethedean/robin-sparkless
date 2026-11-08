@@ -1,6 +1,6 @@
 # Embedding robin-sparkless
 
-This guide summarizes the supported 4.19 embedding surface for applications and bindings such as PyO3, Node, and CLI tools.
+This guide summarizes the supported 4.20 embedding surface for applications and bindings such as PyO3, Node, and CLI tools.
 
 ## Recommended embedding API
 
@@ -46,10 +46,10 @@ Where a method still returns `PolarsError`, convert with **`robin_sparkless::to_
 
 - **[examples/embed_basic.rs](https://github.com/eddiethedean/robin-sparkless/blob/main/examples/embed_basic.rs)** — Uses the ExprIr API: `create_dataframe_engine`, `filter_expr_ir`, `group_by_engine`, `agg_expr_ir`. Creates a session from config, runs a simple pipeline (filter + groupBy + agg), and prints schema and JSON rows. Run with: `cargo run --example embed_basic`.
 
-  Example output (key order in JSON may vary):
+  The grouped result has long `id`, `score` (count), and `score_1` (sum) fields.
+  Example JSON output (row/key order may vary):
 
   ```
-  Schema: Ok(StructType { fields: [StructField { name: "id", data_type: Long, nullable: true }, StructField { name: "score", data_type: String, nullable: true }, StructField { name: "score_1", data_type: Long, nullable: true }] })
   Rows (JSON): [{"score_1":300,"id":3,"score":1},{"score_1":200,"id":2,"score":1}]
   ```
 

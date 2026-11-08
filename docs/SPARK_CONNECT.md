@@ -171,12 +171,16 @@ hard process-memory guarantees:
 | Detached-operation retention | 60 seconds |
 
 Capacity exhaustion and unsupported plans return errors; the server does not report a successful
-truncated result. Native CPU time and intermediate memory remain cooperative. Session catalogs and
-operation records are in memory and disappear on restart. Reattachment is bounded by the retention
-and output budgets and is not a durable exactly-once guarantee.
+truncated result. Native CPU time and intermediate memory remain cooperative. In Polars mode,
+managed catalogs and operation records disappear on restart. DuckDB execution persists tables
+and write receipts in its configured owner; sessions and retained query results still disappear.
+Reattachment of query results is bounded by retention and output budgets. See
+[write recovery](WRITE_RECOVERY.md) before retrying a command.
 
-Spark Connect SQL commands, writes, artifacts, UDFs, Structured Streaming, filesystem/network
-readers, unsupported expressions and logical types, and arbitrary plans are outside this contract.
+In Polars mode, SQL commands and writes are unsupported. DuckDB execution accepts only its
+declared SQL/command subset, including typed CREATE TABLE and literal INSERT VALUES.
+Artifacts, UDFs, Structured Streaming, filesystem/network readers, unsupported expressions
+and logical types, and arbitrary plans are outside both contracts.
 The service returns an explicit error for unsupported operations. Connect user IDs partition
 session state; they do not authenticate clients. The server does not provide Connect
 authentication by itself. Keep the listener on loopback unless deployment supplies an

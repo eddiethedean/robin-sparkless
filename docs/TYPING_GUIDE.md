@@ -5,14 +5,15 @@ This project targets **Python 3.11+** and maintains type hints for both:
 - The public Python package `sparkless` (PySpark-like API), and
 - The Rust-backed native module exposed via `sparkless_native._native`.
 
-Type checking is performed with **mypy** and **pyright**.
+CI requires **mypy**. A basic **pyright** configuration is also provided for
+contributors who install and run it; it is not an additional required CI lane.
 
 ### Targets and guarantees
 
 - **Library code** (`python/sparkless/sparkless`):
   - Public functions, classes, and modules are expected to have **precise types**.
   - mypy runs in a stricter mode with `--check-untyped-defs` via
-    `scripts/typecheck_strict.sh`, which checks the `sparkless` package only.
+    `scripts/typecheck_strict.sh`, which checks the local API, testing helpers, and shared launcher.
 - **Tests and helper scripts** (`tests/`, `scripts/`):
   - Typing is **best-effort**; annotations are added where they materially improve
     safety or readability, but some `Any` is tolerated.
@@ -22,7 +23,7 @@ Type checking is performed with **mypy** and **pyright**.
 - **Strict mypy for library code**:
   - `scripts/typecheck_strict.sh`
   - Uses `python/pyproject.toml` as the mypy config and runs with
-    `--check-untyped-defs` on `python/sparkless/sparkless`.
+    `--check-untyped-defs` on `python/sparkless/sparkless`, `python/testing/sparkless_testing`, and `python/connect/sparkless_connect`.
 - **pyright**:
   - Configured via `[tool.pyright]` in `python/pyproject.toml` with
     `pythonVersion = "3.11"` and `typeCheckingMode = "basic"`.

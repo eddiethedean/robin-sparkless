@@ -56,7 +56,7 @@ uv venv --python 3.11 .venv
 
 # Install contributor tools before building the native engine
 uv pip install --python .venv/bin/python "maturin>=1.4,<2"
-uv pip install --python .venv/bin/python pytest pandas pytest-xdist hypothesis pytest-timeout polars pyarrow ruff mypy
+uv pip install --python .venv/bin/python pytest pandas pytest-xdist hypothesis pytest-timeout polars pyarrow ruff mypy build wheel setuptools pyyaml
 
 # Build the engine, then install the Python API with editable sources
 (
@@ -66,6 +66,7 @@ uv pip install --python .venv/bin/python pytest pandas pytest-xdist hypothesis p
 )
 uv pip install --python .venv/bin/python --no-deps -e python
 uv pip install --python .venv/bin/python --no-deps -e python/testing
+uv pip install --python .venv/bin/python --no-deps -e python/connect
 ```
 
 Run these Bash examples from the repository root. No environment activation is required.
@@ -88,11 +89,31 @@ uv run --no-project --python .venv/bin/python python -c \
   "import sparkless, sparkless_native._native; print(sparkless.__file__); print(sparkless_native._native.__file__)"
 ```
 
-To build distribution wheels, build the engine with `maturin build --release --manifest-path python/native/Cargo.toml`
-and the universal API with `python -m build --wheel python`. Install both wheels
+To build distribution wheels, use `.venv/bin/python -m maturin build --locked --release --manifest-path python/native/Cargo.toml`
+and `.venv/bin/python -m build --wheel python`. Install both wheels
 from `target/wheels/` and `python/dist/` in a fresh environment, then use the test
 commands below. If uv's cache is on a different filesystem, add `--link-mode=copy`
 to `uv pip install` to avoid the hardlink fallback warning.
+
+## Contributor profiles
+
+The setup above installs the local API, testing helpers, shared launcher, build,
+lint and metadata tools. Extend that environment only for your area:
+
+| Work | Additional setup | First verification |
+| --- | --- | --- |
+| Local Python/native | Canonical setup above; rebuild native after Rust changes | Run a focused pytest test and `make lint-python` |
+| Docs and API inventory | Install `docs/requirements.txt` into the same `.venv` | Run [documentation checks](docs/DOCUMENTATION.md#checks); API generation imports the shared launcher |
+| SQLite examples | Rebuild native with `--features sqlite` in addition to defaults | `.venv/bin/python examples/python/jdbc_sqlite.py` |
+| HTTP/Connect launcher | Install editable `python/server` or `python/server-duckdb` with `--no-deps`; build the matching Rust executable | Pass its absolute `executable_path` or `--server-bin` in examples; editable product sources contain no packaged binary |
+| Connect client | Install `pyspark-client==4.0.5` in a separate environment from JVM PySpark | Follow `tests/connect/README.md` and run the selected transport smoke |
+| Package builds | Canonical setup includes `build` and Maturin | Build API/native wheels, install in a fresh environment, then `python -m pip check` |
+
+Native compilation requires a C/C++ compiler/linker: Xcode Command Line Tools on
+macOS, Visual Studio C++ Build Tools on Windows, and compiler/build tools on
+Linux. Install CMake if a selected native dependency requests it. Oracle and DB2
+features also require their vendor client/ODBC environment. Keep optional driver
+work separate from documentation-only work. No global Python activation is assumed.
 
 ## Checks before opening a PR
 

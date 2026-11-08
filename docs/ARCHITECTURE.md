@@ -18,8 +18,13 @@ Python application                       Rust application
 
 HTTP SQL clients ---- native server ---- Connect gRPC clients
                          |
-             shared engine, admission, service catalog,
-             sessions, operation identities, replay buffers
+             shared admission, sessions and replay buffers
+                         |
+             +-----------+---------------------+
+             |                                 |
+     Polars / in-memory catalog      optional DuckDB Connect adapter
+                                    configured owner / durable tables
+                                    and transactional write receipts
 ```
 
 Python wrappers implement compatibility behavior around the native extension;
@@ -30,6 +35,9 @@ crate implements them, and the root facade exposes the Rust API. See
 [engine layering](ENGINE_ARCHITECTURE.md) for module and dependency details.
 
 ## Follow a Connect query
+
+This trace describes the default Polars backend. DuckDB execution uses its
+separate typed-plan adapter and configured owner.
 
 1. In `spark.range(10).filter("id > 5").count()`, PySpark serializes the range,
    filter, and count as a Spark Connect plan. The count triggers execution.
@@ -52,9 +60,12 @@ Local sessions own temporary views and configuration. Process-global views and
 explicit disk warehouses have distinct lifetimes ([persistence](PERSISTENCE_GUIDE.md)).
 External catalog providers own their storage and write receipts, with defined
 cancellation/commit boundaries ([provider contract](EXTERNAL_CATALOGS.md)).
-The server owns its catalog, sessions, operations, admission and replay state in
-memory. HTTP and Connect share one instance, with reserved namespaces separating
-identities. Neither a server restart nor a client timeout implies durable rollback.
+Polars-mode servers own their managed catalog, sessions, operations, admission and
+replay state in memory. The optional DuckDB Connect execution adapter persists tables
+and transactional write receipts in a configured local or shared owner. Sessions,
+admission and retained query results remain in memory in both modes. HTTP SQL is
+disabled in DuckDB execution mode. HTTP and Connect share one instance, with reserved
+namespaces separating identities. Neither a server restart nor a client timeout implies durable rollback.
 No distributed scheduler, executor fleet, or cross-node recovery subsystem exists.
 
 ## Trust boundaries

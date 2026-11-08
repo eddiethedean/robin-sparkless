@@ -1,6 +1,6 @@
 # JDBC and SQLite Testing
 
-> **4.18 build prerequisite:** official Python wheels do not enable JDBC/SQLite.
+> **4.20 native build prerequisite:** official Python wheels do not enable JDBC/SQLite.
 > The `jdbc` extra installs test tools, not native features. Follow the
 > [native feature build recipe](INSTALLATION.md#platforms-and-build-features)
 > before these tests. SQLite needs no external service **after** its native feature
@@ -24,69 +24,68 @@ Enable one or more features via Cargo (e.g. `--features jdbc,sqlite,jdbc_mysql`)
 
 ## PySpark-Compatible JDBC Options
 
-The following PySpark JDBC options are supported:
+These are native database adapters with PySpark-style URL/options; they do not
+load arbitrary Java JDBC classes. `driver` is a routing hint, not a JAR loader.
+An accepted option does not imply Spark partitioning or fetch behavior.
 
-### Connection & Query Options
+### Per-driver option behavior
 
-| Option | Type | Description |
-|--------|------|-------------|
-| `url` | String | **Required.** JDBC connection URL |
-| `dbtable` | String | Table name to read/write |
-| `query` | String | SQL query for reads (alternative to `dbtable`) |
-| `user` | String | Database username |
-| `password` | String | Database password |
-| `driver` | String | Driver class hint (for disambiguation) |
+`Used` means the adapter consumes the option; it does not establish identical
+Spark semantics or live integration coverage. PostgreSQL uses `jdbc`, MariaDB
+shares the MySQL adapter, and DB2 requires a configured ODBC driver.
 
-### Read Options
+| Option | PostgreSQL | SQLite | MySQL / MariaDB | SQL Server | Oracle | DB2 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `url`, `dbtable` or read `query` | Used | Used | Used | Used | Used | Used |
+| `user`, `password` | Used | Not applicable | Used | Used | Used | Used |
+| `sessionInitStatement` | Used | Used | Used | Used | Used | Used |
+| Read `prepareQuery` | Used | Used | Used | Used | Used | Used |
+| Read `queryTimeout` | Server statement timeout | SQLite busy/lock timeout | Server setting | Server setting | Call timeout | Accepted without effect |
+| `fetchsize` | Attempts a server setting; unverified as a fetch contract | Accepted without effect | Accepted without effect | Accepted without effect | Accepted without effect | Accepted without effect |
+| `partitionColumn`, `lowerBound`, `upperBound`, `numPartitions` | Accepted without partitioned execution | Same | Same | Same | Same | Same |
+| Write `batchsize` | Used | Used | Used | Progress interval; no batching guarantee | Used | Used |
+| Write `truncate` | Used | DELETE behavior | Used | Used | Used | Used |
+| Write `cascadeTruncate` | Used with truncate | No effect | No effect | No effect | Used with truncate | No effect |
 
-| Option | Type | Description |
-|--------|------|-------------|
-| `sessionInitStatement` | String | SQL to execute after connection (e.g., `SET timezone='UTC'`) |
-| `queryTimeout` | Integer | Query timeout in seconds (backend-specific implementation) |
-| `prepareQuery` | String | SQL to execute before main query (for CTEs, temp tables) |
-| `fetchsize` | Integer | Number of rows to fetch per round trip |
-| `partitionColumn` | String | Column for partitioned reads |
-| `lowerBound` | Long | Lower bound for partitioning |
-| `upperBound` | Long | Upper bound for partitioning |
-| `numPartitions` | Integer | Number of partitions |
+Timeouts have backend-specific meanings; a SQLite busy timeout is not a query
+execution deadline. Do not size memory or concurrency on the assumption that
+`numPartitions` partitions a read or that `fetchsize` bounds materialization.
+Adapters collect database results into a local DataFrame. Inspect your exact
+backend's integration results before relying on an unverified setting.
 
-### Write Options
+`SPARKLESS_HARDENED=1` disables arbitrary query/init/prepare SQL unless explicitly
+re-enabled; use `dbtable`. See [configuration](CONFIGURATION.md).
 
-| Option | Type | Description |
-|--------|------|-------------|
-| `batchsize` | Integer | Rows per batch/transaction (default: 1000) |
-| `truncate` | Boolean | Use `TRUNCATE` vs `DELETE` for Overwrite mode |
-| `cascadeTruncate` | Boolean | Add CASCADE to TRUNCATE (Postgres/Oracle only) |
+### Save modes and partial writes
 
-### SaveMode Behavior
+Use explicit `mode="append"`, `"overwrite"`, `"error"` or `"ignore"`.
+These database adapters generally test existing **rows**, rather than table
+existence, for error/ignore behavior. Overwrite can truncate or delete before
+inserting. Driver transaction and batch behavior differ; do not assume a failed
+multi-batch write rolled back every effect. Reconcile with the database before
+retrying a write under a fresh operation identity.
 
-| Mode | Behavior |
-|------|----------|
-| `Append` | Insert rows into existing table |
-| `Overwrite` | Truncate/delete existing data, then insert |
-| `ErrorIfExists` | Error if table has any existing rows |
-| `Ignore` | Do nothing if table has existing rows |
+### Runnable SQLite example
 
-### Usage Examples
+First build the native extension with `sqlite` using the
+[feature recipe](INSTALLATION.md#platforms-and-build-features). Python extras
+alone cannot enable it. Download
+[jdbc_sqlite.py](https://github.com/eddiethedean/robin-sparkless/blob/main/examples/python/jdbc_sqlite.py)
+and run `python jdbc_sqlite.py`. It creates disposable source/destination tables,
+reads two rows, writes them through the native adapter, and verifies storage with
+Python's independent SQLite reader. Expect `SQLite native read/write passed`.
+
+For a configured PostgreSQL database, this is a **fragment** using an existing
+`spark`, `url`, `props`, and `users` table:
 
 ```python
-# Read with session initialization
-df = spark.read.format("jdbc") \
-    .option("url", "jdbc:postgresql://localhost/db") \
-    .option("dbtable", "users") \
-    .option("sessionInitStatement", "SET timezone='UTC'") \
-    .option("queryTimeout", "30") \
-    .load()
-
-# Write with batching
-df.write.format("jdbc") \
-    .option("url", "jdbc:mysql://localhost/db") \
-    .option("dbtable", "results") \
-    .option("batchsize", "5000") \
-    .option("truncate", "true") \
-    .mode("overwrite") \
-    .save()
+df = spark.read.jdbc(url, "users", properties=props)
+df.write.jdbc(url, "users_backup", properties=props, mode="overwrite")
 ```
+
+Prefer these methods to `format("jdbc").load()` / `.save()`: the current Python
+`load(path)` and `save(path)` require a path, and generic file `save` does not
+provide a JDBC writer. Direct `jdbc` properties override reader options.
 
 ## Quick Reference
 

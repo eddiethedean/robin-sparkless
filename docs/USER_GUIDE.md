@@ -1,321 +1,101 @@
-# Robin Sparkless User Guide
+# Rust user guide
 
-This guide shows you how to use Robin Sparkless for everyday data work. It assumes basic familiarity with DataFrame concepts (like PySpark or Pandas).
-
----
-
-## What is Robin Sparkless?
-
-Robin Sparkless is a **PySpark-style DataFrame library** that runs in Rust with [Polars](https://www.pola.rs/) as the engine—**no JVM**. You get:
-
-- Familiar APIs: `SparkSession`, `DataFrame`, `filter`, `select`, `group_by`, etc.
-- **Lazy by default**: transformations extend the plan; only actions (`collect`, `show`, `count`, `write`) trigger execution—aligns with PySpark and enables Polars query optimization.
-- Fast execution on Polars
-
-### Two expression APIs
-
-- **ExprIr (engine-agnostic):** Use `col`, `lit_i64`, `gt`, `when`, etc. from the **crate root**; they build an `ExprIr` tree. Use `filter_expr_ir`, `select_expr_ir`, `with_column_expr_ir`, `collect_rows`, and `GroupedData::agg_expr_ir`. Prefer this for new code and embeddings; errors are `EngineError`, and the public API does not expose Polars types.
-- **Column / Expr (Polars):** Use the **prelude** or `robin_sparkless::functions` for `col`, `lit_i64`, etc., which return `Column`. Use `filter`, `with_column`, `select_exprs`, and the full set of string/window/aggregate functions. Use this when you need the full PySpark-like API or are porting existing Column-based code.
-
-The rest of this guide shows the **Column API** (prelude) for maximum familiarity; you can substitute the ExprIr equivalents where noted.
-
----
+Use this guide for the Rust **Column API**. Python applications should follow
+the [Python quickstart](python_getting_started.md). For engine-independent
+expressions and errors, follow [ExprIr embedding](EMBEDDING.md).
 
 ## Installation
 
-### Rust
-
-Add to `Cargo.toml`:
-
-```toml
-[dependencies]
-robin-sparkless = "4"
-```
-
-Optional features (one dependency entry; select only what you need):
+Use Rust 1.93 or newer; the repository pins 1.93.1. Start with a new Cargo
+application as shown in the [Rust quickstart](QUICKSTART.md).
 
 ```toml
 [dependencies]
-robin-sparkless = { version = "4", features = ["sql", "delta", "sqlite"] }
+robin-sparkless = { version = "=4.20.0", features = ["sql"] }
 ```
 
-See [installation and distribution features](INSTALLATION.md) for driver flags.
-**Rust consumer security:** apply the pinned patch described in the
-[4.18 zstd notice](security/zstd-4.18-exception.md); the unpatched consumer graph
-has an exception expiring **2026-11-26**. Official patched distributions have a
-separate dependency graph.
+SQL, Delta and database drivers are opt-in Cargo features. See the
+[feature matrix](INSTALLATION.md#platforms-and-build-features). The
+[security policy](SECURITY.md#known-dependency-exception) scopes historical
+dependency exceptions by version; the 4.18 patch is not a blanket 4.x requirement.
+Minor releases can break interfaces; review [upgrades](UPGRADING.md) before
+changing the version pin.
 
----
+## Filter, project, sort and aggregate
 
-## Getting Started
-
-### Your First Session
+Save this complete program as `src/main.rs` and run `cargo run`. It keeps Bob
+and Charlie, verifies the row count, and aggregates age by name. Transformations
+build plans; `count`, `collect_as_json_rows` and `show` execute them.
 
 ```rust
 use robin_sparkless::SparkSession;
+use robin_sparkless::functions::{col, lit_i64};
 
-let spark = SparkSession::builder()
-    .app_name("my_app")
-    .get_or_create();
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let spark = SparkSession::builder().app_name("rust-guide").get_or_create();
+    let people = spark.create_dataframe(
+        vec![
+            (1, 25, "Alice".to_string()),
+            (2, 30, "Bob".to_string()),
+            (3, 35, "Charlie".to_string()),
+        ],
+        vec!["id", "age", "name"],
+    )?;
+    let adults = people
+        .filter(col("age").gt(lit_i64(25).into_expr()).into_expr())?
+        .select(vec!["name", "age"])?
+        .order_by(vec!["age"], vec![true])?
+        .limit(10)?;
+    assert_eq!(adults.count()?, 2);
+    let rows = adults.collect_as_json_rows()?;
+    assert_eq!(rows[0]["name"], "Bob");
+    adults.group_by(vec!["name"])?.sum("age")?.show(Some(10))?;
+    spark.create_or_replace_temp_view("adults", adults);
+    assert_eq!(spark.sql("SELECT name FROM adults WHERE age > 30")?.count()?, 1);
+    Ok(())
+}
 ```
 
-### Creating a DataFrame
-
-```rust
-let df = spark.create_dataframe(
-    vec![
-        (1, 25, "Alice".to_string()),
-        (2, 30, "Bob".to_string()),
-        (3, 35, "Charlie".to_string()),
-    ],
-    vec!["id", "age", "name"],
-)?;
-```
-
-**From files**
-
-```rust
-let df = spark.read_csv("data.csv")?;
-let df = spark.read_parquet("data.parquet")?;
-let df = spark.read_json("data.json")?;
-```
-
----
-
-## Core Operations
-
-### Filter
-
-Keep rows that satisfy a condition.
-
-```rust
-use robin_sparkless::{col, lit_i64};
-
-let adults = df.filter(col("age").gt(lit_i64(25).into_expr()).into_expr())?;
-```
-
-### Select
-
-Choose columns (and optionally transform them) using `select` and expressions.
-
-### With Column
-
-Add or replace a column with computed values using `with_column` or `with_column_expr`.
-
-### Order By and Limit
-
-Sort by one or more columns and take the first N rows using `order_by` and `limit`.
-
----
-
-## Joins
-
-Join two DataFrames on common columns using `DataFrame::join` with `JoinType` (`Inner`, `Left`, `Right`, `Outer`).
-
----
-
-## Aggregations
-
-Group and aggregate with `group_by` and `GroupedData` methods such as `count`, `sum`, `avg`, `min`, `max`, and more.
-
----
-
-## Reading and Writing Data
-
-Use `SparkSession::read_csv`, `read_parquet`, and `read_json` to read data, and `DataFrame::write` (writer API) to write Parquet/CSV/JSON.
-
-### JDBC / External Databases
-
-Read from and write to external databases using a PySpark-compatible JDBC API. Supported backends:
-
-| Backend | Feature | URL Example |
-|---------|---------|-------------|
-| PostgreSQL | `jdbc` | `jdbc:postgresql://localhost:5432/mydb` |
-| SQLite | `sqlite` | `jdbc:sqlite:/path/to/db.db` |
-| MySQL | `jdbc_mysql` | `jdbc:mysql://localhost:3306/mydb` |
-| MariaDB | `jdbc_mariadb` | `jdbc:mariadb://localhost:3307/mydb` |
-| SQL Server | `jdbc_mssql` | `jdbc:sqlserver://localhost:1433;databaseName=mydb` |
-| Oracle | `jdbc_oracle` | `jdbc:oracle:thin:@//localhost:1521/ORCL` |
-| DB2 | `jdbc_db2` | `jdbc:db2://localhost:50000/mydb` |
-
-Add the feature in your `Cargo.toml`:
-
-```toml
-[dependencies]
-robin-sparkless = { version = "4", features = ["jdbc", "sqlite", "jdbc_mysql"] }
-```
-
-#### Python Example
-
-```python
-url = "jdbc:postgresql://localhost:5432/mydb"
-props = {"user": "admin", "password": "secret"}
-
-# Basic read
-df = spark.read.jdbc(url=url, table="users", properties=props)
-
-# Read with options (PySpark-compatible)
-df = (spark.read
-    .format("jdbc")
-    .option("url", url)
-    .option("dbtable", "users")
-    .option("sessionInitStatement", "SET timezone='UTC'")
-    .option("queryTimeout", "30")
-    .options(props)
-    .load("."))
-
-# Write with batching and truncate
-df.write.jdbc(
-    url=url,
-    table="users_backup",
-    properties={"batchsize": "5000", "truncate": "true", **props},
-    mode="overwrite"
-)
-
-# SQLite (no server required)
-df = spark.read.jdbc(url="jdbc:sqlite:/tmp/test.db", table="my_table", properties={})
-df.write.jdbc(url="jdbc:sqlite:/tmp/test.db", table="results", properties={}, mode="append")
-```
-
-#### Supported Options
-
-| Option | Type | Description |
-|--------|------|-------------|
-| `sessionInitStatement` | String | SQL to execute after connection (e.g., `SET timezone='UTC'`) |
-| `queryTimeout` | Integer | Query timeout in seconds |
-| `prepareQuery` | String | SQL to execute before main query (for CTEs, temp tables) |
-| `fetchsize` | Integer | Rows per fetch |
-| `batchsize` | Integer | Rows per batch/transaction on write (default: 1000) |
-| `truncate` | Boolean | Use `TRUNCATE` vs `DELETE` for Overwrite mode |
-| `cascadeTruncate` | Boolean | Add CASCADE to TRUNCATE (PostgreSQL/Oracle) |
-
-#### Save Modes
-
-| Mode | Behavior |
-|------|----------|
-| `append` | Insert rows into existing table |
-| `overwrite` | Truncate/delete existing data, then insert |
-| `error` | Error if table has any existing rows |
-| `ignore` | Do nothing if table has existing rows |
-
-See [JDBC_TESTING.md](JDBC_TESTING.md) for setup, Docker Compose files, and CI configuration.
-
----
-
-## SQL (Optional)
-
-With the `sql` feature, you can run SQL against temp views.
-
-```rust
-spark.create_or_replace_temp_view("people", df.clone());
-let result = spark.sql("SELECT name, age FROM people WHERE age > 25 ORDER BY age")?;
-```
-
-Supports: `SELECT`, `FROM`, `JOIN`, `WHERE`, `GROUP BY`, `ORDER BY`, `LIMIT`. Built-in functions (e.g. `UPPER`, `LOWER`) and registered UDFs work in SQL.
-
-In SELECT expressions, single and double quotes delimit string literals. Use
-backticks for quoted identifiers. String escapes are decoded when Sparkless parses
-the query and the resulting values are preserved through execution.
-
----
-
-## User-Defined Functions
-
-The local Python interface uses `F.udf(callable, DataType())`, not the historical
-`builder()` / `spark.udf().register` forms. See the complete, tested
-[UDF guide](UDF_GUIDE.md) for imports, null handling, return types, and contexts.
-Rust native expression registration is a separate extension API.
-
----
-
-## Persistence and Tables
-
-- **Temp views**: `df.createOrReplaceTempView("my_table")` — in-session only
-- **Global temp views**: `df.createOrReplaceGlobalTempView("global_table")` — visible across sessions
-- **Saved tables**: `df.write.saveAsTable("my_table", mode="overwrite")` — disk-backed when `spark.sql.warehouse.dir` is set
-
-See [Persistence Guide](PERSISTENCE_GUIDE.md) for more.
-
----
-
-## Common Patterns
-
-### Chaining Operations
-
-```python
-result = (
-    df.filter(rs.col("age") > 18)
-    .select([rs.col("name"), rs.col("age")])
-    .order_by(["age"], ascending=[False])
-    .limit(10)
-)
-```
-
-### Conditional Logic (when/then/otherwise)
-
-```python
-# Nested when/then/otherwise for multiple conditions
-df2 = df.with_column(
-    "category",
-    rs.when(rs.col("age") >= 65)
-    .then(rs.lit("senior"))
-    .otherwise(
-        rs.when(rs.col("age") >= 18).then(rs.lit("adult")).otherwise(rs.lit("minor"))
-    ),
-)
-```
-
-### Handling Nulls
-
-```python
-df2 = df.with_column("age_filled", rs.coalesce(rs.col("age"), rs.lit(0)))
-df2 = df.na().fill(rs.lit(0))   # Fill nulls in all columns with 0
-df2 = df.na().drop(subset=["name"])   # Drop rows with null in "name"
-```
-
----
-
-## Collecting Results
-
-**Rust**
-
-```rust
-let rows = df.collect_as_json_rows()?;  // Vec<HashMap<String, JsonValue>>
-df.show(Some(20))?;                     // Print to stdout
-```
-
-**Python**
-
-```python
-rows = df.collect()           # List of dicts
-df.show(20)                   # Print to stdout
-# to_pandas() returns list of dicts; for a pandas DataFrame use:
-# pandas.DataFrame.from_records(df.to_pandas())
-```
-
-Example `collect()` output for the quick-start DataFrame (id, age, name):
-
-```
-[{'id': 1, 'age': 25, 'name': 'Alice'}, {'id': 2, 'age': 30, 'name': 'Bob'}, {'id': 3, 'age': 35, 'name': 'Charlie'}]
-```
-
----
-
-## Troubleshooting
-
-| Error | Cause | Fix |
-|-------|-------|-----|
-| Column 'X' not found | Typo or wrong case | Check column names with `df.columns()` |
-| create_dataframe: expected 3 column names | Rust `create_dataframe` needs exactly 3 columns | In Python use `createDataFrame(data, schema)` for any schema |
-| call_udf: no session | UDF used before session created | Use `SparkSession.builder().get_or_create()` first |
-| SQL: unknown function | Function not built-in or UDF | Register with `spark.udf().register()` or use a built-in |
-
----
-
-## Next Steps
-
-- [Quickstart](QUICKSTART.md) — Build from source, more examples
-For end-to-end API details, see the Rust docs on docs.rs.
-- [UDF Guide](UDF_GUIDE.md) — Custom functions in detail
-- [Persistence Guide](PERSISTENCE_GUIDE.md) — Temp views, tables, warehouse
-- [PySpark Differences](PYSPARK_DIFFERENCES.md) — How Robin differs from PySpark
+The checked copy is [examples/user_guide.rs](https://github.com/eddiethedean/robin-sparkless/blob/main/examples/user_guide.rs).
+From a checkout, run `cargo run --locked --example user_guide --features sql`.
+
+## Choose matching expressions
+
+| Expression type | Import | Matching DataFrame method |
+| --- | --- | --- |
+| Column / Polars Expr | `robin_sparkless::functions::{col, lit_i64}` | `filter(expr)`, `with_column(name, &column)`, `select_exprs(exprs)` |
+| Engine-independent ExprIr | `robin_sparkless::engine::{col, gt, lit_i64}` | `filter_expr_ir(&expr)`, `select_expr_ir(&exprs)`, `collect_rows()` |
+
+The two sets of helpers share names but return different types. Do not replace
+the imports in the complete program with crate-root helpers. For computed
+columns use `with_column`; for joins use `join(&other, keys, JoinType::Inner)`.
+Alias ambiguous fields and define null-key and duplicate-name expectations.
+The [API reference](RUST_API_REFERENCE.md) supplies exact method signatures.
+
+## Files, tables and extensions
+
+Read local files with `read_csv`, `read_json` or `read_parquet`; write through
+`df.write()`. Path writes default to overwrite. File append can read and rewrite
+existing data and is not an atomic append log. See [format options](FILE_IO.md)
+before choosing options, paths or save modes.
+
+With SQL enabled, register session-local views with
+`create_or_replace_temp_view`, then query through that same session. A configured
+warehouse persists saved tables as Parquet; it is separate from server storage.
+See [persistence and concurrent access](PERSISTENCE_GUIDE.md#storage-and-concurrency-contract).
+
+Native expression UDFs use `SparkSession::register_udf`. Python scalar UDFs have
+a different interface and execute only in the local Python API. External
+storage uses the [catalog provider contract](EXTERNAL_CATALOGS.md). Database
+access requires [driver features and per-driver options](JDBC_TESTING.md).
+
+## Errors and next steps
+
+Column API calls commonly return `PolarsError`; the embedding API uses structured
+`EngineError`. Invalid names or types may fail when constructing a plan or running
+an action. Propagate errors with `?`; inspect [error categories](ERRORS.md) at
+application boundaries. Collecting returns all rows in process memory.
+
+Continue with [embedding](EMBEDDING.md), [SQL dialects](SQL_REFERENCE.md), or
+[architecture](ENGINE_ARCHITECTURE.md). Validate representative results against
+your production Spark version using the [support contract](SUPPORT_MATRIX.md).

@@ -43,6 +43,8 @@ finally:
 
 </div>
 
+[Choose a workflow by role](DOC_INDEX.md) · [Upgrade an existing installation](UPGRADING.md)
+
 ## Choose how to run your code
 
 <div class="grid cards sparkless-paths" markdown>

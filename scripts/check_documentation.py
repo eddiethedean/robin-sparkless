@@ -78,6 +78,58 @@ def main() -> None:
             errors.append(
                 f"{path.relative_to(ROOT)} exceeds the 350-word README budget; move detail to docs"
             )
+    inventory = json.loads(
+        (ROOT / "docs/reference/python-api-inventory.json").read_text()
+    )
+    contracts = json.loads(
+        (ROOT / "docs/reference/python-api-contracts.json").read_text()
+    )
+    public = {
+        f"{section}.{name}"
+        for section, entries in inventory.items()
+        for name in entries
+    }
+    for name, contract in contracts.items():
+        if name not in public:
+            errors.append(f"Authored API contract names absent inventory entry: {name}")
+        for field in ("parameters", "returns", "errors", "example"):
+            if not contract.get(field):
+                errors.append(f"API contract {name} has no {field}")
+    examples = json.loads((ROOT / "docs/reference/examples.json").read_text())
+    seen = set()
+    for entry in examples:
+        if entry["id"] in seen:
+            errors.append(f"Duplicate documentation example: {entry['id']}")
+        seen.add(entry["id"])
+        source = ROOT / entry["source"]
+        if not source.exists():
+            errors.append(f"Missing example source: {entry['source']}")
+            continue
+        for field in ("profiles", "dependencies", "expected", "verification"):
+            if not entry.get(field):
+                errors.append(f"Example {entry['id']} has no {field}")
+        if entry["kind"] == "python-fences":
+            blocks = re.findall(
+                r"^```python\n(.*?)^```", source.read_text(), re.M | re.S
+            )
+            if not blocks or any(
+                index >= len(blocks) or index < 0 for index in entry.get("fences", [])
+            ):
+                errors.append(f"Example {entry['id']} selects absent Python fences")
+        if entry["kind"] == "rust":
+            page = (ROOT / entry["page"]).read_text()
+            blocks = re.findall(r"^```rust\n(.*?)^```", page, re.M | re.S)
+
+            def normalized(text):
+                code = re.sub(r"^\s*//.*$", "", text, flags=re.M)
+                return re.sub(
+                    r'("(?:\\.|[^"\\])*")|\s+', lambda match: match[1] or "", code
+                )
+
+            if not blocks or normalized(blocks[0]) != normalized(source.read_text()):
+                errors.append(
+                    f"Rust guide differs from compiled example: {entry['page']}"
+                )
     if errors:
         raise SystemExit("\n".join(errors))
     print(

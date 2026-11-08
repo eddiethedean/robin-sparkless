@@ -11,10 +11,9 @@ Spark 4.0.5 reference. Unsupported operations fail explicitly; they never fall
 back to Polars. The release contract lists tested result/schema cases,
 unsupported operations, packaged platforms, and measured operating limits.
 
-The optional `sparkless-server-duckdb` product can run supported Spark Connect
-plans in DuckDB and store typed tables in one configured DuckDB owner. The
-default backend remains Polars. Select the backend when the server starts; a
-server process and its sessions use one backend for their lifetime.
+Select the backend at startup; a server process and its sessions use one backend
+for their lifetime. For a complete disposable example including an independent
+storage reader, run [duckdb_execution.py](https://github.com/eddiethedean/robin-sparkless/blob/main/examples/python/duckdb_execution.py).
 
 ## Start with a local database
 
@@ -194,6 +193,10 @@ credit to replenish; reattachable response acknowledgements have a separate
 for the full product boundary.
 
 ## Persistence, retries, and shutdown
+
+Follow the [write recovery cookbook](WRITE_RECOVERY.md) for HTTP status polling,
+Connect identity reuse, restart checks, and the distinction between public SQL
+calls and lower-level protocol replay.
 
 Tables and operation receipts persist in the configured database. A receipt is
 committed in the same transaction as its write and is capped at 1,000,000

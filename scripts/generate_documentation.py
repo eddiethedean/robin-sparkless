@@ -90,6 +90,11 @@ def api(check: bool) -> None:
     import sparkless_connect.server as server
     from sparkless import external_catalog
 
+    contracts = json.loads(
+        (ROOT / "docs/reference/python-api-contracts.json").read_text()
+    )
+    reviewed = set()
+
     sections = []
     for name in [
         "SparkSession",
@@ -127,8 +132,12 @@ def api(check: bool) -> None:
         "CI regenerates this against its wheel and fails on drift. This is the runtime",
         "symbol/signature inventory; [API contracts](PYTHON_API_REFERENCE.md) supplies",
         "argument semantics, returns, errors and practical examples for common operations.",
-        "Missing native docstrings are stated explicitly; importability alone is not",
-        "evidence of Spark parity. Consult the [support contract](SUPPORT_MATRIX.md).",
+        "Each entry distinguishes an authored contract, a runtime description, or an",
+        "unreviewed symbol. Examples are fragments using an existing `spark`, `df`,",
+        "`functions as F`, `types as T`, and `Window` unless stated otherwise.",
+        "Importability alone is not evidence of Spark parity. Consult the",
+        "[support contract](SUPPORT_MATRIX.md), [file options](FILE_IO.md), and",
+        "[SQL dialects](SQL_REFERENCE.md).",
         "",
     ]
     inventory = {}
@@ -142,6 +151,8 @@ def api(check: bool) -> None:
             if name.startswith("_"):
                 continue
             value = getattr(obj, name, None)
+            contract_key = f"{label}.{name}"
+            contract = contracts.get(contract_key)
             if inspect.ismodule(value):
                 continue
             # Avoid documenting imported typing/helpers as package API.
@@ -156,25 +167,53 @@ def api(check: bool) -> None:
                     signature = str(inspect.signature(value))
                 except (ValueError, TypeError):
                     signature = "(native signature unavailable)"
+                runtime_doc = inspect.getdoc(value)
                 doc = (
-                    inspect.getdoc(value)
-                    or "No runtime docstring. See the API contracts and support matrix before relying on this symbol."
+                    "**Documentation status: runtime description; no authored per-symbol contract.**\n\n"
+                    + runtime_doc
+                    if runtime_doc
+                    else "**Documentation status: unreviewed.** No runtime docstring or authored contract. "
+                    "Behavior outside the support matrix is unknown; inspect source and add an oracle "
+                    "regression before depending on this symbol."
                 )
                 # Object-address reprs are unstable and not useful API documentation.
                 import re
 
                 signature = re.sub(r" at 0x[0-9a-fA-F]+", "", signature)
-                lines += [f"### `{name}{signature}`", "", doc, ""]
+                lines += [f"### `{name}{signature}`", ""]
                 entries[name] = signature
             else:
-                lines += [
-                    f"### `{name}`",
-                    "",
-                    "Property/descriptor; see the API contracts for semantics.",
-                    "",
-                ]
+                lines += [f"### `{name}`", ""]
+                doc = "**Documentation status: unreviewed property/descriptor.** See the support matrix; the inventory does not establish its behavior."
                 entries[name] = "property"
+            if contract:
+                reviewed.add(contract_key)
+                lines += [
+                    "**Documentation status: authored local contract.** Supported contexts still follow the support matrix.",
+                    "",
+                    f"- **Parameters:** {contract['parameters']}",
+                    f"- **Returns:** {contract['returns']}",
+                    f"- **Errors:** {contract['errors']}",
+                    f"- **Example fragment:** `{contract['example']}`",
+                ]
+                if contract.get("notes"):
+                    lines += [f"- **Notes:** {contract['notes']}"]
+                lines += [""]
+            else:
+                lines += [doc, ""]
         inventory[label] = entries
+    if missing := set(contracts) - reviewed:
+        raise SystemExit(
+            f"Authored contracts name absent public symbols: {sorted(missing)}"
+        )
+    lines += [
+        "## Documentation coverage",
+        "",
+        f"{len(reviewed)} of {sum(map(len, inventory.values()))} inventoried entries have authored contracts.",
+        "Other entries explicitly retain their runtime-only or unreviewed status.",
+        "These counts measure documentation coverage, not engine parity or passing tests.",
+        "",
+    ]
     save("docs/PYTHON_API_SYMBOLS.md", "\n".join(lines), check)
     save(
         "docs/reference/python-api-inventory.json",

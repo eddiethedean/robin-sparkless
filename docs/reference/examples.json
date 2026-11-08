@@ -1,0 +1,320 @@
+[
+  {
+    "id": "repository-readme",
+    "source": "README.md",
+    "kind": "python-fences",
+    "profiles": [
+      "local"
+    ],
+    "dependencies": [
+      "sparkless==4.20.0"
+    ],
+    "expected": "Bob",
+    "verification": "Executable assertions or observable output; see source.",
+    "fences": [
+      0
+    ],
+    "stdout_contains": [
+      "Bob"
+    ]
+  },
+  {
+    "id": "package-readme",
+    "source": "python/README.md",
+    "kind": "python-fences",
+    "profiles": [
+      "local"
+    ],
+    "dependencies": [
+      "sparkless==4.20.0"
+    ],
+    "expected": "Bob",
+    "verification": "Executable assertions or observable output; see source.",
+    "fences": [
+      0
+    ],
+    "stdout_contains": [
+      "Bob"
+    ]
+  },
+  {
+    "id": "local-first-run",
+    "source": "docs/python_getting_started.md",
+    "kind": "python-fences",
+    "profiles": [
+      "local"
+    ],
+    "dependencies": [
+      "sparkless==4.20.0"
+    ],
+    "expected": "Bob",
+    "verification": "Executable assertions or observable output; see source.",
+    "fences": [
+      0
+    ],
+    "stdout_contains": [
+      "Bob"
+    ]
+  },
+  {
+    "id": "local-api",
+    "source": "docs/PYTHON_API_REFERENCE.md",
+    "kind": "python-fences",
+    "profiles": [
+      "local"
+    ],
+    "dependencies": [
+      "sparkless==4.20.0",
+      "pyarrow"
+    ],
+    "expected": "All example assertions pass",
+    "verification": "Executable assertions or observable output; see source."
+  },
+  {
+    "id": "scalar-udf",
+    "source": "docs/UDF_GUIDE.md",
+    "kind": "python-fences",
+    "profiles": [
+      "local"
+    ],
+    "dependencies": [
+      "sparkless==4.20.0",
+      "pyarrow"
+    ],
+    "expected": "All example assertions pass",
+    "verification": "Executable assertions or observable output; see source."
+  },
+  {
+    "id": "cancellation",
+    "source": "docs/EXECUTION_CANCELLATION.md",
+    "kind": "python-fences",
+    "profiles": [
+      "local"
+    ],
+    "dependencies": [
+      "sparkless==4.20.0",
+      "pyarrow"
+    ],
+    "expected": "All example assertions pass",
+    "verification": "Executable assertions or observable output; see source."
+  },
+  {
+    "id": "migration",
+    "source": "docs/python_migration.md",
+    "kind": "python-fences",
+    "profiles": [
+      "local"
+    ],
+    "dependencies": [
+      "sparkless==4.20.0",
+      "pyarrow"
+    ],
+    "expected": "All example assertions pass",
+    "verification": "Executable assertions or observable output; see source."
+  },
+  {
+    "id": "warehouse-processes",
+    "source": "examples/python/warehouse_roundtrip.py",
+    "kind": "python-script",
+    "profiles": [
+      "local"
+    ],
+    "dependencies": [
+      "sparkless==4.20.0"
+    ],
+    "expected": "Values and long schema survive independent processes",
+    "verification": "Executable assertions or observable output; see source."
+  },
+  {
+    "id": "provider-commit-and-rejection",
+    "source": "examples/python/external_provider.py",
+    "kind": "python-script",
+    "profiles": [
+      "provider"
+    ],
+    "dependencies": [
+      "sparkless==4.20.0 with native delta",
+      "pyarrow"
+    ],
+    "expected": "Complete commit then rejection leaves storage/version unchanged",
+    "verification": "Executable assertions or observable output; see source.",
+    "stdout_contains": [
+      "provider read, commit, receipt and budget rejection passed"
+    ]
+  },
+  {
+    "id": "native-sqlite",
+    "source": "examples/python/jdbc_sqlite.py",
+    "kind": "python-script",
+    "profiles": [
+      "native-sqlite"
+    ],
+    "dependencies": [
+      "native built with sqlite"
+    ],
+    "expected": "Two rows copied and independently checked with sqlite3",
+    "verification": "Executable assertions or observable output; see source."
+  },
+  {
+    "id": "http-first-query",
+    "source": "docs/HTTP_API.md",
+    "kind": "python-fences",
+    "profiles": [
+      "http"
+    ],
+    "dependencies": [
+      "sparkless-server==4.20.0"
+    ],
+    "expected": "[[1]]",
+    "verification": "Executable assertions or observable output; see source.",
+    "fences": [
+      0
+    ]
+  },
+  {
+    "id": "http-recovery",
+    "source": "examples/python/http_recovery.py",
+    "kind": "python-script",
+    "profiles": [
+      "http"
+    ],
+    "dependencies": [
+      "sparkless-server==4.20.0"
+    ],
+    "expected": "One INSERT effect; old instance rejected after restart",
+    "verification": "Executable assertions or observable output; see source.",
+    "stdout_contains": [
+      "HTTP same-instance replay and restart boundary passed"
+    ]
+  },
+  {
+    "id": "connect-first-query",
+    "source": "docs/SPARK_CONNECT.md",
+    "kind": "python-fences",
+    "profiles": [
+      "connect"
+    ],
+    "dependencies": [
+      "sparkless-server[connect]==4.20.0"
+    ],
+    "expected": "Count equals 4",
+    "verification": "Executable assertions or observable output; see source.",
+    "fences": [
+      0
+    ]
+  },
+  {
+    "id": "connect-file-pipeline",
+    "source": "examples/python/connect_load_query.py",
+    "kind": "python-script",
+    "profiles": [
+      "connect"
+    ],
+    "dependencies": [
+      "sparkless-server[connect]==4.20.0"
+    ],
+    "expected": "Exact exported rows checked",
+    "verification": "Executable assertions or observable output; see source."
+  },
+  {
+    "id": "connect-workers",
+    "source": "examples/connect_xdist",
+    "kind": "pytest",
+    "profiles": [
+      "connect"
+    ],
+    "dependencies": [
+      "sparkless-server[connect]==4.20.0",
+      "pytest",
+      "pytest-xdist"
+    ],
+    "expected": "Two tests pass",
+    "verification": "Executable assertions or observable output; see source.",
+    "args": [
+      "-n",
+      "2",
+      "-q"
+    ]
+  },
+  {
+    "id": "duckdb-source",
+    "source": "docs/DUCKDB_SOURCE.md",
+    "kind": "python-fences",
+    "profiles": [
+      "duckdb"
+    ],
+    "dependencies": [
+      "sparkless-server-duckdb[connect]==4.20.0",
+      "duckdb==1.5.1"
+    ],
+    "expected": "paid=2, pending=1",
+    "verification": "Executable assertions or observable output; see source.",
+    "fences": [
+      0
+    ]
+  },
+  {
+    "id": "duckdb-execution",
+    "source": "examples/python/duckdb_execution.py",
+    "kind": "python-script",
+    "profiles": [
+      "duckdb"
+    ],
+    "dependencies": [
+      "sparkless-server-duckdb[connect]==4.20.0",
+      "duckdb==1.5.1"
+    ],
+    "expected": "Write, independent read and restart retain two events",
+    "verification": "Executable assertions or observable output; see source."
+  },
+  {
+    "id": "rust-first-run",
+    "source": "examples/demo.rs",
+    "kind": "rust",
+    "profiles": [
+      "rust"
+    ],
+    "dependencies": [
+      "Rust 1.93.1"
+    ],
+    "expected": "Program completes successfully",
+    "verification": "Executable assertions or observable output; see source.",
+    "page": "docs/QUICKSTART.md",
+    "example": "demo",
+    "features": [
+      "sql"
+    ]
+  },
+  {
+    "id": "rust-column-guide",
+    "source": "examples/user_guide.rs",
+    "kind": "rust",
+    "profiles": [
+      "rust"
+    ],
+    "dependencies": [
+      "Rust 1.93.1"
+    ],
+    "expected": "Program completes successfully",
+    "verification": "Executable assertions or observable output; see source.",
+    "page": "docs/USER_GUIDE.md",
+    "example": "user_guide",
+    "features": [
+      "sql"
+    ]
+  },
+  {
+    "id": "api-workflows",
+    "source": "examples/python/api_workflows.py",
+    "kind": "python-script",
+    "profiles": [
+      "local"
+    ],
+    "dependencies": [
+      "sparkless==4.20.0",
+      "pyarrow"
+    ],
+    "expected": "Null, conditional, join, aggregate, window and Arrow assertions pass",
+    "verification": "Exact values, schema, empty input and batch row count assertions."
+  }
+]

@@ -159,3 +159,9 @@ GHCR publication uses the workflow token's `packages: write` permission for
 Follow the [documentation maintenance and release checklist](DOCUMENTATION.md).
 Keep public examples runnable from an installed wheel, assert actual test backend
 identity, and run the strict docs job before declaring a release candidate ready.
+
+Before recording hosted documentation as published, run the
+[hosted verification](DOCUMENTATION.md#verify-hosted-publication) for latest/stable
+and the actual Rust route. Review [example profiles](EXAMPLES.md) and preserve the
+browsable bundle for the released source. A successful local build or uploaded
+artifact is not a successful live deployment.

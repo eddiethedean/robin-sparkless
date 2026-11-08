@@ -17,7 +17,7 @@ and `SparkSessionBackend` use associated `Frame` and `Reader` types as well.
 removed. Use the general row constructor, which accepts JSON-compatible values and
 an explicit schema:
 
-```rust,ignore
+```rust
 session.create_dataframe_from_rows(
     vec![vec![serde_json::json!(7), serde_json::json!("Ada")]],
     vec![("id".into(), "long".into()), ("name".into(), "string".into())],
@@ -37,7 +37,7 @@ Compose an ownership/table `CatalogResolver` with optional `CatalogReader` and
 `CatalogBatchWriter` capabilities. Every write capability uses bounded Arrow IPC
 batches:
 
-```rust,ignore
+```rust
 let resolver: Arc<dyn CatalogResolver> = Arc::new(my_resolver);
 let reader: Option<Arc<dyn CatalogReader>> = Some(Arc::new(my_reader));
 let writer: Option<Arc<dyn CatalogBatchWriter>> = Some(Arc::new(my_writer));
@@ -115,7 +115,7 @@ on error.
 and message parsing with `category()`, `code()`, `retryability()`, `operation()`, and
 `detail()`:
 
-```rust,ignore
+```rust
 match error.category() {
     ErrorCategory::Cancelled => handle_cancel(),
     ErrorCategory::Provider if error.code() == "WRITE_OUTCOME_UNKNOWN" => reconcile(),
@@ -178,7 +178,7 @@ in `ConnectExecutionResult`. The transport encodes the logical schema for the wi
 The product crates re-export the server application types. Embedders that need a
 specific product identity can construct it explicitly:
 
-```rust,ignore
+```rust
 use sparkless_server::{Server, ServerConfig, ServerProduct};
 
 let server = Server::new_for_product(config, ServerProduct::Base)?;

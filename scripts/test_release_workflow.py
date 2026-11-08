@@ -89,7 +89,9 @@ class ReleaseWorkflowTests(unittest.TestCase):
         reuse_index = names.index(
             "Reuse immutable files already published for this release"
         )
-        inventory_index = names.index("Verify complete wheel and source distribution inventory")
+        inventory_index = names.index(
+            "Verify complete wheel and source distribution inventory"
+        )
         storage_index = names.index("Check current PyPI storage before publishing")
         self.assertLess(reuse_index, inventory_index)
         self.assertLess(inventory_index, storage_index)
@@ -330,8 +332,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("Dockerfile.release", container_build)
         self.assertIn("Dockerfile.duckdb.release", container_build)
         container_publish = "\n".join(
-            step.get("run", "")
-            for step in jobs["publish-server-container"]["steps"]
+            step.get("run", "") for step in jobs["publish-server-container"]["steps"]
         )
         self.assertIn("compare_published_files", container_publish)
         self.assertIn("docker cp", container_publish)

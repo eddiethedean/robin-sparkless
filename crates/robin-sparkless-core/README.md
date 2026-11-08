@@ -25,14 +25,14 @@ Most users depend on the main crate only:
 
 ```toml
 [dependencies]
-robin-sparkless = "4"
+robin-sparkless = "=4.20.0"
 ```
 
 If you are building a custom backend or need only types and expression IR:
 
 ```toml
 [dependencies]
-robin-sparkless-core = "4"
+robin-sparkless-core = "=4.20.0"
 ```
 
 ## License

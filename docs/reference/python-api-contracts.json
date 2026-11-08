@@ -1,0 +1,982 @@
+{
+  "Catalog.dropGlobalTempView": {
+    "errors": "Invalid/native errors.",
+    "example": "spark.catalog.dropTempView(\"orders\")",
+    "notes": "",
+    "parameters": "view name string.",
+    "returns": "Removal result for the relevant temporary registration."
+  },
+  "Catalog.dropTable": {
+    "errors": "Provider/native errors may propagate.",
+    "example": "spark.catalog.dropTable(\"orders\")",
+    "notes": "Does not promise filesystem deletion of warehouse/external data.",
+    "parameters": "table name string.",
+    "returns": "Removal result for the local saved-table registration."
+  },
+  "Catalog.dropTempView": {
+    "errors": "Invalid/native errors.",
+    "example": "spark.catalog.dropTempView(\"orders\")",
+    "notes": "",
+    "parameters": "view name string.",
+    "returns": "Removal result for the relevant temporary registration."
+  },
+  "Catalog.listTables": {
+    "errors": "Provider/namespace lookup errors.",
+    "example": "spark.catalog.listTables()",
+    "notes": "",
+    "parameters": "dbName=None: optional database name.",
+    "returns": "List of names, not PySpark Table objects."
+  },
+  "Catalog.tableExists": {
+    "errors": "Provider/lookup error.",
+    "example": "spark.catalog.tableExists(\"orders\")",
+    "notes": "",
+    "parameters": "table name string.",
+    "returns": "bool; provider failures propagate rather than becoming false."
+  },
+  "Column.alias": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "F.sum(\"amount\").alias(\"total\")",
+    "notes": "",
+    "parameters": "alias: output field name string.",
+    "returns": "Column with renamed output."
+  },
+  "Column.asc": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.orderBy(F.col(\"id\").asc())",
+    "notes": "",
+    "parameters": "No arguments.",
+    "returns": "Sort expression specifying direction and, where named, null placement."
+  },
+  "Column.asc_nulls_first": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.orderBy(F.col(\"id\").asc_nulls_first())",
+    "notes": "",
+    "parameters": "No arguments.",
+    "returns": "Sort expression specifying direction and, where named, null placement."
+  },
+  "Column.asc_nulls_last": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.orderBy(F.col(\"id\").asc_nulls_last())",
+    "notes": "",
+    "parameters": "No arguments.",
+    "returns": "Sort expression specifying direction and, where named, null placement."
+  },
+  "Column.astype": {
+    "errors": "Invalid type or failed conversion according to compatibility profile.",
+    "example": "F.col(\"amount\").cast(\"double\")",
+    "notes": "",
+    "parameters": "type_name: supported type string or DataType object exposing simpleString/typeName.",
+    "returns": "Column with a type-conversion expression."
+  },
+  "Column.between": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "F.col(\"age\").between(18, 65)",
+    "notes": "",
+    "parameters": "lower, upper: scalar or Column boundaries, inclusive.",
+    "returns": "Boolean Column."
+  },
+  "Column.cast": {
+    "errors": "Invalid type or failed conversion according to compatibility profile.",
+    "example": "F.col(\"amount\").cast(\"double\")",
+    "notes": "",
+    "parameters": "type_name: supported type string or DataType object exposing simpleString/typeName.",
+    "returns": "Column with a type-conversion expression."
+  },
+  "Column.contains": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "F.col(\"name\").contains(\"A\")",
+    "notes": "",
+    "parameters": "Substring/pattern argument; like uses SQL wildcard patterns, rlike regular expressions.",
+    "returns": "Boolean string-test Column."
+  },
+  "Column.desc": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.orderBy(F.col(\"id\").desc())",
+    "notes": "",
+    "parameters": "No arguments.",
+    "returns": "Sort expression specifying direction and, where named, null placement."
+  },
+  "Column.descNullsLast": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.orderBy(F.col(\"id\").descNullsLast())",
+    "notes": "",
+    "parameters": "No arguments.",
+    "returns": "Sort expression specifying direction and, where named, null placement."
+  },
+  "Column.desc_nulls_first": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.orderBy(F.col(\"id\").desc_nulls_first())",
+    "notes": "",
+    "parameters": "No arguments.",
+    "returns": "Sort expression specifying direction and, where named, null placement."
+  },
+  "Column.desc_nulls_last": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.orderBy(F.col(\"id\").desc_nulls_last())",
+    "notes": "",
+    "parameters": "No arguments.",
+    "returns": "Sort expression specifying direction and, where named, null placement."
+  },
+  "Column.endswith": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "F.col(\"name\").endswith(\"a\")",
+    "notes": "",
+    "parameters": "Substring/pattern argument; like uses SQL wildcard patterns, rlike regular expressions.",
+    "returns": "Boolean string-test Column."
+  },
+  "Column.eqNullSafe": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "F.col(\"id\").eqNullSafe(F.col(\"other_id\"))",
+    "notes": "",
+    "parameters": "other: comparable value/Column.",
+    "returns": "Null-safe equality Column; unlike ordinary equality, compares nulls explicitly."
+  },
+  "Column.eq_null_safe": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "F.col(\"id\").eqNullSafe(F.col(\"other_id\"))",
+    "notes": "",
+    "parameters": "other: comparable value/Column.",
+    "returns": "Null-safe equality Column; unlike ordinary equality, compares nulls explicitly."
+  },
+  "Column.isNotNull": {
+    "errors": "Native planning/execution error.",
+    "example": "F.col(\"id\").isNotNull()",
+    "notes": "",
+    "parameters": "No arguments.",
+    "returns": "Boolean Column testing non-null."
+  },
+  "Column.isNull": {
+    "errors": "Native planning/execution error.",
+    "example": "F.col(\"id\").isNull()",
+    "notes": "",
+    "parameters": "No arguments.",
+    "returns": "Boolean Column testing null."
+  },
+  "Column.is_not_null": {
+    "errors": "Native planning/execution error.",
+    "example": "F.col(\"id\").isNotNull()",
+    "notes": "",
+    "parameters": "No arguments.",
+    "returns": "Boolean Column testing non-null."
+  },
+  "Column.is_null": {
+    "errors": "Native planning/execution error.",
+    "example": "F.col(\"id\").isNull()",
+    "notes": "",
+    "parameters": "No arguments.",
+    "returns": "Boolean Column testing null."
+  },
+  "Column.isin": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "F.col(\"id\").isin([1, 2])",
+    "notes": "",
+    "parameters": "Values or supported sequence, as shown in runtime signature.",
+    "returns": "Boolean membership Column."
+  },
+  "Column.isnotnull": {
+    "errors": "Native planning/execution error.",
+    "example": "F.col(\"id\").isNotNull()",
+    "notes": "",
+    "parameters": "No arguments.",
+    "returns": "Boolean Column testing non-null."
+  },
+  "Column.isnull": {
+    "errors": "Native planning/execution error.",
+    "example": "F.col(\"id\").isNull()",
+    "notes": "",
+    "parameters": "No arguments.",
+    "returns": "Boolean Column testing null."
+  },
+  "Column.like": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "F.col(\"name\").like(\"A%\")",
+    "notes": "",
+    "parameters": "Substring/pattern argument; like uses SQL wildcard patterns, rlike regular expressions.",
+    "returns": "Boolean string-test Column."
+  },
+  "Column.name": {
+    "errors": "Native property access errors if the column cannot provide its name.",
+    "example": "F.col(\"id\").name",
+    "notes": "This is not the PySpark name(alias) method.",
+    "parameters": "Read-only property; no call arguments.",
+    "returns": "String name carried by this Column. Use alias(name) to rename output."
+  },
+  "Column.over": {
+    "errors": "Unsupported window/frame/input types or planning errors.",
+    "example": "F.row_number().over(Window.partitionBy(\"region\").orderBy(\"amount\"))",
+    "notes": "",
+    "parameters": "window: Window specification with partition/order/frame definitions.",
+    "returns": "Window expression Column."
+  },
+  "Column.rlike": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "F.col(\"name\").rlike(\"^A\")",
+    "notes": "",
+    "parameters": "Substring/pattern argument; like uses SQL wildcard patterns, rlike regular expressions.",
+    "returns": "Boolean string-test Column."
+  },
+  "Column.startswith": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "F.col(\"name\").startswith(\"A\")",
+    "notes": "",
+    "parameters": "Substring/pattern argument; like uses SQL wildcard patterns, rlike regular expressions.",
+    "returns": "Boolean string-test Column."
+  },
+  "DataFrame.agg": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.agg(F.sum(\"amount\").alias(\"total\"))",
+    "notes": "",
+    "parameters": "*exprs: aggregate Column expressions, normally explicitly aliased.",
+    "returns": "A global aggregate DataFrame."
+  },
+  "DataFrame.alias": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.alias(\"orders\")",
+    "notes": "",
+    "parameters": "name: relation alias string.",
+    "returns": "A new DataFrame; transformations generally remain lazy until an action."
+  },
+  "DataFrame.cache": {
+    "errors": "Unsupported arguments or native failures may raise errors.",
+    "example": "df.cache()",
+    "notes": "Do not use this spelling as evidence of distributed behavior or a performance guarantee.",
+    "parameters": "Compatibility arguments shown in the runtime signature.",
+    "returns": "Local compatibility result; no Spark executor/storage/shuffle guarantee."
+  },
+  "DataFrame.coalesce": {
+    "errors": "Unsupported arguments or native failures may raise errors.",
+    "example": "df.coalesce(1)",
+    "notes": "Do not use this spelling as evidence of distributed behavior or a performance guarantee.",
+    "parameters": "Compatibility arguments shown in the runtime signature.",
+    "returns": "Local compatibility result; no Spark executor/storage/shuffle guarantee."
+  },
+  "DataFrame.collect": {
+    "errors": "Native execution/conversion/cancellation errors.",
+    "example": "rows = df.collect()",
+    "notes": "Materializes the entire result; use row[name] explicitly rather than assuming iteration yields values.",
+    "parameters": "No arguments.",
+    "returns": "List of Rows supporting field-name and positional access."
+  },
+  "DataFrame.columns": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "value = df.columns",
+    "notes": "Names preserve projection order.",
+    "parameters": "Property; no call arguments.",
+    "returns": "List of field names"
+  },
+  "DataFrame.count": {
+    "errors": "Native execution or cancellation error.",
+    "example": "n = df.count()",
+    "notes": "",
+    "parameters": "No arguments.",
+    "returns": "Integer row count; executes the plan."
+  },
+  "DataFrame.createOrReplaceGlobalTempView": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.createOrReplaceGlobalTempView(\"orders\")",
+    "notes": "Does not survive process restart.",
+    "parameters": "name: process-global temporary view name.",
+    "returns": "None; access through global_temp.name within this process."
+  },
+  "DataFrame.createOrReplaceTempView": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.createOrReplaceTempView(\"orders\")",
+    "notes": "",
+    "parameters": "name: session-local view identifier.",
+    "returns": "None; registers/replaces the view in the associated session."
+  },
+  "DataFrame.create_or_replace_temp_view": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.createOrReplaceTempView(\"orders\")",
+    "notes": "",
+    "parameters": "name: session-local view identifier.",
+    "returns": "None; registers/replaces the view in the associated session."
+  },
+  "DataFrame.distinct": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.distinct()",
+    "notes": "Output order is unspecified.",
+    "parameters": "No arguments.",
+    "returns": "DataFrame with duplicate rows removed."
+  },
+  "DataFrame.drop": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.drop(\"temporary\")",
+    "notes": "",
+    "parameters": "Field names to remove.",
+    "returns": "A new DataFrame; transformations generally remain lazy until an action."
+  },
+  "DataFrame.dropDuplicates": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.dropDuplicates([\"id\"])",
+    "notes": "Do not rely on which non-key values survive without a separate policy.",
+    "parameters": "Optional subset of field names; omit for whole-row deduplication.",
+    "returns": "Deduplicated DataFrame."
+  },
+  "DataFrame.drop_duplicates": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.dropDuplicates([\"id\"])",
+    "notes": "Do not rely on which non-key values survive without a separate policy.",
+    "parameters": "Optional subset of field names; omit for whole-row deduplication.",
+    "returns": "Deduplicated DataFrame."
+  },
+  "DataFrame.dtypes": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "value = df.dtypes",
+    "notes": "Use schema for nested and nullability detail.",
+    "parameters": "Property; no call arguments.",
+    "returns": "Name/type pairs"
+  },
+  "DataFrame.filter": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.filter(F.col(\"id\") > 1)",
+    "notes": "",
+    "parameters": "condition: Boolean Column or supported SQL predicate string. Null predicate rows are removed.",
+    "returns": "A new DataFrame; transformations generally remain lazy until an action."
+  },
+  "DataFrame.groupBy": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.groupBy(\"region\").agg(F.sum(\"amount\").alias(\"total\"))",
+    "notes": "",
+    "parameters": "*cols: field names/expressions; omit for global aggregation.",
+    "returns": "GroupedData; call agg/count/sum/etc. to obtain a DataFrame."
+  },
+  "DataFrame.group_by": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.group_by([\"region\"]).sum(\"amount\")",
+    "notes": "",
+    "parameters": "column_names: list of field-name strings. Use groupBy(*cols) for the PySpark-style variadic form.",
+    "returns": "GroupedData; call agg/count/sum/etc. to obtain a DataFrame."
+  },
+  "DataFrame.groupby": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.groupBy(\"region\").agg(F.sum(\"amount\").alias(\"total\"))",
+    "notes": "",
+    "parameters": "*cols: field names/expressions; omit for global aggregation.",
+    "returns": "GroupedData; call agg/count/sum/etc. to obtain a DataFrame."
+  },
+  "DataFrame.join": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "orders.join(customers, on=\"customer_id\", how=\"left\")",
+    "notes": "Alias ambiguous fields. Non-equality joins can materialize a cross product and hit the row cap.",
+    "parameters": "other: DataFrame; on: name/list or supported equality condition; how defaults to inner. left_on/right_on optionally use different key names.",
+    "returns": "A new DataFrame; transformations generally remain lazy until an action."
+  },
+  "DataFrame.limit": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.limit(10)",
+    "notes": "An unordered input has no stable row-selection contract.",
+    "parameters": "n: nonnegative row count.",
+    "returns": "A new DataFrame; transformations generally remain lazy until an action."
+  },
+  "DataFrame.na": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "value = df.na",
+    "notes": "Supports documented fill/drop operations; not all Spark NA behavior.",
+    "parameters": "Property; no call arguments.",
+    "returns": "Null-value helper"
+  },
+  "DataFrame.orderBy": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.orderBy(\"id\", ascending=False)",
+    "notes": "Add tie-breakers for deterministic ordering. No distributed sort semantics are promised.",
+    "parameters": "*cols: names or sort expressions; ascending defaults to ascending and may be a bool/list.",
+    "returns": "A new DataFrame; transformations generally remain lazy until an action."
+  },
+  "DataFrame.order_by": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.orderBy(\"id\", ascending=False)",
+    "notes": "Add tie-breakers for deterministic ordering. No distributed sort semantics are promised.",
+    "parameters": "*cols: names or sort expressions; ascending defaults to ascending and may be a bool/list.",
+    "returns": "A new DataFrame; transformations generally remain lazy until an action."
+  },
+  "DataFrame.persist": {
+    "errors": "Unsupported arguments or native failures may raise errors.",
+    "example": "df.persist()",
+    "notes": "Do not use this spelling as evidence of distributed behavior or a performance guarantee.",
+    "parameters": "Compatibility arguments shown in the runtime signature.",
+    "returns": "Local compatibility result; no Spark executor/storage/shuffle guarantee."
+  },
+  "DataFrame.rdd": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "value = df.rdd",
+    "notes": "No distributed execution. Materialization cap applies.",
+    "parameters": "Property; no call arguments.",
+    "returns": "Bounded local RDD helper"
+  },
+  "DataFrame.repartition": {
+    "errors": "Unsupported arguments or native failures may raise errors.",
+    "example": "df.repartition(2)",
+    "notes": "Do not use this spelling as evidence of distributed behavior or a performance guarantee.",
+    "parameters": "Compatibility arguments shown in the runtime signature.",
+    "returns": "Local compatibility result; no Spark executor/storage/shuffle guarantee."
+  },
+  "DataFrame.schema": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "value = df.schema",
+    "notes": "Inspect names, order, types and nullability.",
+    "parameters": "Property; no call arguments.",
+    "returns": "StructType"
+  },
+  "DataFrame.select": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.select(\"id\", F.col(\"amount\").alias(\"total\"))",
+    "notes": "",
+    "parameters": "*cols: field-name strings or Column expressions; alias computed expressions. Strings are names, not SQL expressions.",
+    "returns": "A new DataFrame; transformations generally remain lazy until an action."
+  },
+  "DataFrame.selectExpr": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.selectExpr(\"id\", \"amount + 1 AS next_amount\")",
+    "notes": "",
+    "parameters": "*exprs: supported SQL expression strings.",
+    "returns": "A new DataFrame; transformations generally remain lazy until an action."
+  },
+  "DataFrame.show": {
+    "errors": "Native execution/display/cancellation errors.",
+    "example": "df.show(5, truncate=False)",
+    "notes": "For inspection; use a supported writer for export.",
+    "parameters": "n=20 maximum displayed rows; truncate=True controls display shortening.",
+    "returns": "None; prints a table."
+  },
+  "DataFrame.sort": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.orderBy(\"id\", ascending=False)",
+    "notes": "Add tie-breakers for deterministic ordering. No distributed sort semantics are promised.",
+    "parameters": "*cols: names or sort expressions; ascending defaults to ascending and may be a bool/list.",
+    "returns": "A new DataFrame; transformations generally remain lazy until an action."
+  },
+  "DataFrame.toArrow": {
+    "errors": "ImportError or conversion/execution error.",
+    "example": "table = df.toArrow()",
+    "notes": "Collects the complete result.",
+    "parameters": "No arguments; PyArrow required.",
+    "returns": "PyArrow Table."
+  },
+  "DataFrame.toArrowBatches": {
+    "errors": "ValueError for invalid limits or an oversized row; execution/cancellation errors.",
+    "example": "with df.toArrowBatches(max_rows=16) as batches: sizes = [b.num_rows for b in batches]",
+    "notes": "Batch bounds do not cap intermediate query memory or process RSS.",
+    "parameters": "max_rows=10000 and max_bytes=67108864: positive per-output-batch bounds; PyArrow required.",
+    "returns": "Context-managed RecordBatch iterator; close on early exit."
+  },
+  "DataFrame.toPandas": {
+    "errors": "ImportError when dependency is missing; native conversion/execution errors.",
+    "example": "pdf = df.toPandas()",
+    "notes": "Collects the complete result; validate decimal, timestamp and nested conversions.",
+    "parameters": "No arguments; pandas required.",
+    "returns": "pandas DataFrame."
+  },
+  "DataFrame.to_arrow_batches": {
+    "errors": "ValueError for invalid limits or an oversized row; execution/cancellation errors.",
+    "example": "with df.toArrowBatches(max_rows=16) as batches: sizes = [b.num_rows for b in batches]",
+    "notes": "Batch bounds do not cap intermediate query memory or process RSS.",
+    "parameters": "max_rows=10000 and max_bytes=67108864: positive per-output-batch bounds; PyArrow required.",
+    "returns": "Context-managed RecordBatch iterator; close on early exit."
+  },
+  "DataFrame.union": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.union(other)",
+    "notes": "Validate column order and types; use unionByName for name alignment.",
+    "parameters": "other: compatible DataFrame; columns align by position.",
+    "returns": "A concatenated DataFrame; duplicates are retained."
+  },
+  "DataFrame.unionAll": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.union(other)",
+    "notes": "Validate column order and types; use unionByName for name alignment.",
+    "parameters": "other: compatible DataFrame; columns align by position.",
+    "returns": "A concatenated DataFrame; duplicates are retained."
+  },
+  "DataFrame.unionByName": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.unionByName(other, allowMissingColumns=True)",
+    "notes": "",
+    "parameters": "other: DataFrame; allowMissingColumns=True permits missing fields.",
+    "returns": "A concatenated DataFrame aligned by name."
+  },
+  "DataFrame.union_all": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.union(other)",
+    "notes": "Validate column order and types; use unionByName for name alignment.",
+    "parameters": "other: compatible DataFrame; columns align by position.",
+    "returns": "A concatenated DataFrame; duplicates are retained."
+  },
+  "DataFrame.where": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.filter(F.col(\"id\") > 1)",
+    "notes": "",
+    "parameters": "condition: Boolean Column or supported SQL predicate string. Null predicate rows are removed.",
+    "returns": "A new DataFrame; transformations generally remain lazy until an action."
+  },
+  "DataFrame.withColumn": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.withColumn(\"next_id\", F.col(\"id\") + 1)",
+    "notes": "",
+    "parameters": "name: output column string; col: Column expression. Adds or replaces that name.",
+    "returns": "A new DataFrame; transformations generally remain lazy until an action."
+  },
+  "DataFrame.withColumnRenamed": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.withColumnRenamed(\"id\", \"order_id\")",
+    "notes": "",
+    "parameters": "existing and new field names. Validate collisions in your workload.",
+    "returns": "A new DataFrame; transformations generally remain lazy until an action."
+  },
+  "DataFrame.with_column": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.withColumn(\"next_id\", F.col(\"id\") + 1)",
+    "notes": "",
+    "parameters": "name: output column string; col: Column expression. Adds or replaces that name.",
+    "returns": "A new DataFrame; transformations generally remain lazy until an action."
+  },
+  "DataFrame.write": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "value = df.write",
+    "notes": "Property; defaults to overwrite. Set a mode explicitly.",
+    "parameters": "Property; no call arguments.",
+    "returns": "DataFrameWriter"
+  },
+  "DataFrameReader.csv": {
+    "errors": "Missing/invalid path, unsupported compiled feature, parsing and conversion errors.",
+    "example": "spark.read.csv(path)",
+    "notes": "See FILE_IO for exact options and CSV shortcut inference. Delta requires its native feature.",
+    "parameters": "path: local filesystem path; configure supported options before the call.",
+    "returns": "Lazy DataFrame."
+  },
+  "DataFrameReader.delta": {
+    "errors": "Missing/invalid path, unsupported compiled feature, parsing and conversion errors.",
+    "example": "spark.read.delta(path)",
+    "notes": "See FILE_IO for exact options and CSV shortcut inference. Delta requires its native feature.",
+    "parameters": "path: local filesystem path; configure supported options before the call.",
+    "returns": "Lazy DataFrame."
+  },
+  "DataFrameReader.format": {
+    "errors": "Unknown formats fail at load.",
+    "example": "spark.read.format(\"json\")",
+    "notes": "",
+    "parameters": "fmt: supported format name.",
+    "returns": "Reader for chaining."
+  },
+  "DataFrameReader.jdbc": {
+    "errors": "RuntimeError if driver feature is absent; connection/SQL/conversion errors.",
+    "example": "spark.read.jdbc(url, \"users\", properties=props)",
+    "notes": "Partition options are parsed without partitioned execution. Fetch/timeout effects vary by driver; see JDBC matrix.",
+    "parameters": "url: native driver URL; table: database table; properties=None or dictionary; explicit properties override reader options.",
+    "returns": "Local DataFrame from the selected compiled database adapter."
+  },
+  "DataFrameReader.json": {
+    "errors": "Missing/invalid path, unsupported compiled feature, parsing and conversion errors.",
+    "example": "spark.read.json(path)",
+    "notes": "See FILE_IO for exact options and CSV shortcut inference. Delta requires its native feature.",
+    "parameters": "path: local filesystem path; configure supported options before the call.",
+    "returns": "Lazy DataFrame."
+  },
+  "DataFrameReader.load": {
+    "errors": "TypeError when path is omitted; format/IO/feature errors.",
+    "example": "spark.read.format(\"parquet\").load(path)",
+    "notes": "Generic CSV load follows native inference defaults; explicitly set inferSchema.",
+    "parameters": "path: required local path; format defaults to Parquet.",
+    "returns": "Lazy DataFrame."
+  },
+  "DataFrameReader.option": {
+    "errors": "Unsupported option value type.",
+    "example": "spark.read.option(\"header\", True)",
+    "notes": "Retaining an unknown option does not implement it.",
+    "parameters": "key and scalar value; bool/int/float converted to text, None to empty string.",
+    "returns": "Same reader for chaining."
+  },
+  "DataFrameReader.options": {
+    "errors": "TypeError for non-dictionary input or invalid values.",
+    "example": "spark.read.options({\"header\": True, \"inferSchema\": False})",
+    "notes": "",
+    "parameters": "opts: dictionary of option key/value pairs.",
+    "returns": "Same reader for chaining."
+  },
+  "DataFrameReader.parquet": {
+    "errors": "Missing/invalid path, unsupported compiled feature, parsing and conversion errors.",
+    "example": "spark.read.parquet(path)",
+    "notes": "See FILE_IO for exact options and CSV shortcut inference. Delta requires its native feature.",
+    "parameters": "path: local filesystem path; configure supported options before the call.",
+    "returns": "Lazy DataFrame."
+  },
+  "DataFrameReader.table": {
+    "errors": "Missing table/provider/schema errors.",
+    "example": "spark.read.table(\"orders\")",
+    "notes": "",
+    "parameters": "name: local, warehouse or provider table identifier.",
+    "returns": "Resolved DataFrame."
+  },
+  "DataFrameWriter.csv": {
+    "errors": "IO/schema/conversion errors.",
+    "example": "df.write.mode(\"overwrite\").csv(path)",
+    "notes": "Plain file paths distinguish only append from overwrite; error/ignore mode strings do not protect existing data.",
+    "parameters": "path: required local output path.",
+    "returns": "None; executes a file write."
+  },
+  "DataFrameWriter.format": {
+    "errors": "Unsupported format/feature at save.",
+    "example": "df.write.format(\"delta\")",
+    "notes": "",
+    "parameters": "fmt: parquet/csv/json/delta for path saves, or provider format for table saves.",
+    "returns": "Writer for chaining."
+  },
+  "DataFrameWriter.jdbc": {
+    "errors": "Feature/connection/SQL errors; partial multi-batch effects may require reconciliation.",
+    "example": "df.write.jdbc(url, \"backup\", properties=props, mode=\"append\")",
+    "notes": "Driver-specific behavior; no general transaction/Java JDBC plugin contract.",
+    "parameters": "url, table, properties dictionary and optional mode; use an explicit save mode.",
+    "returns": "None; writes through a compiled native driver."
+  },
+  "DataFrameWriter.json": {
+    "errors": "IO/schema/conversion errors.",
+    "example": "df.write.mode(\"overwrite\").json(path)",
+    "notes": "Plain file paths distinguish only append from overwrite; error/ignore mode strings do not protect existing data.",
+    "parameters": "path: required local output path.",
+    "returns": "None; executes a file write."
+  },
+  "DataFrameWriter.mode": {
+    "errors": "Validation depends on destination; plain-file unknown/error/ignore values map to overwrite.",
+    "example": "df.write.mode(\"append\")",
+    "notes": "Initial mode is overwrite. Four-mode semantics apply separately to Delta and table saves.",
+    "parameters": "mode: string; choose explicitly.",
+    "returns": "Writer for chaining."
+  },
+  "DataFrameWriter.option": {
+    "errors": "Invalid option value type.",
+    "example": "df.write.option(\"mergeSchema\", True)",
+    "notes": "Supported effects depend on format; see FILE_IO.",
+    "parameters": "key and scalar value.",
+    "returns": "Writer for chaining, preserving ordered duplicate option pairs for providers."
+  },
+  "DataFrameWriter.options": {
+    "errors": "Invalid mapping/pairs/value types.",
+    "example": "df.write.options({\"header\": True})",
+    "notes": "",
+    "parameters": "Optional mapping or ordered key/value pairs, plus keyword options.",
+    "returns": "Writer for chaining."
+  },
+  "DataFrameWriter.parquet": {
+    "errors": "IO/schema/conversion errors.",
+    "example": "df.write.mode(\"overwrite\").parquet(path)",
+    "notes": "Plain file paths distinguish only append from overwrite; error/ignore mode strings do not protect existing data.",
+    "parameters": "path: required local output path.",
+    "returns": "None; executes a file write."
+  },
+  "DataFrameWriter.partitionBy": {
+    "errors": "Missing/invalid fields or unsupported partition format behavior.",
+    "example": "df.write.partitionBy(\"region\")",
+    "notes": "Hive-style file directories omit partition columns from part files. No Spark dynamic overwrite guarantee.",
+    "parameters": "*cols: partition field names.",
+    "returns": "Writer for chaining."
+  },
+  "DataFrameWriter.save": {
+    "errors": "Missing path TypeError, unsupported format ValueError, native feature/IO/schema errors.",
+    "example": "df.write.format(\"parquet\").mode(\"overwrite\").save(path)",
+    "notes": "Default mode is overwrite. Delta has separate four-mode handling; see FILE_IO.",
+    "parameters": "path: required; selected format defaults to Parquet.",
+    "returns": "None; executes the write."
+  },
+  "DataFrameWriter.saveAsTable": {
+    "errors": "Existence/schema/IO/capability/provider errors; provider commit failures may have unknown outcomes.",
+    "example": "df.write.mode(\"error\").saveAsTable(\"orders\")",
+    "notes": "Initial Python mode is overwrite. A configured warehouse persists local data; otherwise state is local. Provider writes require complete-consumption/receipt rules.",
+    "parameters": "name: table identifier; mode=None uses chained mode; explicit mode overrides it.",
+    "returns": "None; registers/writes the table or delegates to its external owner."
+  },
+  "DataFrameWriter.save_as_table": {
+    "errors": "Existence/schema/IO/capability/provider errors; provider commit failures may have unknown outcomes.",
+    "example": "df.write.mode(\"error\").saveAsTable(\"orders\")",
+    "notes": "Initial Python mode is overwrite. A configured warehouse persists local data; otherwise state is local. Provider writes require complete-consumption/receipt rules.",
+    "parameters": "name: table identifier; mode=None uses chained mode; explicit mode overrides it.",
+    "returns": "None; registers/writes the table or delegates to its external owner."
+  },
+  "GroupedData.agg": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.groupBy(\"region\").agg(F.sum(\"amount\").alias(\"total\"))",
+    "notes": "",
+    "parameters": "*exprs: supported aggregate expressions; use aliases for stable field names.",
+    "returns": "Aggregate DataFrame."
+  },
+  "GroupedData.avg": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.groupBy(\"region\").avg(\"amount\")",
+    "notes": "",
+    "parameters": "*cols: one or more numeric field-name strings; omit only when the numeric-column selection behavior is appropriate for your schema.",
+    "returns": "Aggregate DataFrame; field names/types depend on input and expression."
+  },
+  "GroupedData.count": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.groupBy(\"region\").count()",
+    "notes": "",
+    "parameters": "No arguments.",
+    "returns": "DataFrame with a count for each group."
+  },
+  "GroupedData.max": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.groupBy(\"region\").max(\"amount\")",
+    "notes": "",
+    "parameters": "col_name: required comparable field-name string.",
+    "returns": "Aggregate DataFrame; field names/types depend on input and expression."
+  },
+  "GroupedData.mean": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.groupBy(\"region\").mean(\"amount\")",
+    "notes": "",
+    "parameters": "*cols: one or more numeric field-name strings; omit only when the numeric-column selection behavior is appropriate for your schema.",
+    "returns": "Aggregate DataFrame; field names/types depend on input and expression."
+  },
+  "GroupedData.min": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.groupBy(\"region\").min(\"amount\")",
+    "notes": "",
+    "parameters": "col_name: required comparable field-name string.",
+    "returns": "Aggregate DataFrame; field names/types depend on input and expression."
+  },
+  "GroupedData.pivot": {
+    "errors": "Unsupported keys/types/aggregates or native errors.",
+    "example": "df.groupBy(\"region\").pivot(\"kind\", [\"sale\", \"refund\"]).sum(\"amount\")",
+    "notes": "",
+    "parameters": "pivot_col: field name; optional explicit values as in the runtime signature.",
+    "returns": "Pivoted grouped object for subsequent aggregation."
+  },
+  "GroupedData.sum": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "df.groupBy(\"region\").sum(\"amount\")",
+    "notes": "",
+    "parameters": "col_name: required numeric field-name string.",
+    "returns": "Aggregate DataFrame; field names/types depend on input and expression."
+  },
+  "RuntimeConfig.get": {
+    "errors": "Missing required key or invalid argument.",
+    "example": "spark.conf.get(\"spark.sql.caseSensitive\", \"false\")",
+    "notes": "",
+    "parameters": "key and optional default as shown in runtime signature.",
+    "returns": "Stored configuration value or fallback."
+  },
+  "RuntimeConfig.set": {
+    "errors": "Invalid setting/native error.",
+    "example": "spark.conf.set(\"sparkless.pyspark.compat\", \"4.0\")",
+    "notes": "Configure schemas/warehouse before plans; Connect RuntimeConfig has a separate fixed read-only profile.",
+    "parameters": "key and value; only documented keys have execution effects.",
+    "returns": "None; updates retained configuration."
+  },
+  "SessionBuilder.appName": {
+    "errors": "Invalid argument type.",
+    "example": "SparkSession.builder.appName(\"example\")",
+    "notes": "",
+    "parameters": "name: application label string.",
+    "returns": "Builder for chaining."
+  },
+  "SessionBuilder.app_name": {
+    "errors": "Invalid argument type.",
+    "example": "SparkSession.builder.appName(\"example\")",
+    "notes": "",
+    "parameters": "name: application label string.",
+    "returns": "Builder for chaining."
+  },
+  "SessionBuilder.config": {
+    "errors": "Invalid argument types/configuration.",
+    "example": "SparkSession.builder.config(\"spark.sql.warehouse.dir\", warehouse)",
+    "notes": "Set warehouse before creating the session; see configuration precedence.",
+    "parameters": "key and value: supported Sparkless setting, or retained compatibility key.",
+    "returns": "Builder for chaining."
+  },
+  "SessionBuilder.getOrCreate": {
+    "errors": "Invalid settings or native initialization failure.",
+    "example": "spark = SparkSession.builder.appName(\"example\").getOrCreate()",
+    "notes": "Use newSession for isolated session state; stop only a session you own.",
+    "parameters": "No arguments; configured builder settings apply to the local session selection.",
+    "returns": "A session; compatible active sessions may be reused."
+  },
+  "SessionBuilder.get_or_create": {
+    "errors": "Invalid settings or native initialization failure.",
+    "example": "spark = SparkSession.builder.appName(\"example\").getOrCreate()",
+    "notes": "Use newSession for isolated session state; stop only a session you own.",
+    "parameters": "No arguments; configured builder settings apply to the local session selection.",
+    "returns": "A session; compatible active sessions may be reused."
+  },
+  "SparkSession.builder": {
+    "errors": "Unavailable operations may be absent or raise an error.",
+    "example": "spark.builder",
+    "notes": "A class property; do not call builder().",
+    "parameters": "Property; no call arguments.",
+    "returns": "SessionBuilder"
+  },
+  "SparkSession.cancelAllActiveJobs": {
+    "errors": "Work stops only at cancellation safe points.",
+    "example": "spark.cancelAllActiveJobs()",
+    "notes": "",
+    "parameters": "No arguments.",
+    "returns": "Number of active session actions signaled."
+  },
+  "SparkSession.cancel_all_active_actions": {
+    "errors": "Work stops only at cancellation safe points.",
+    "example": "spark.cancelAllActiveJobs()",
+    "notes": "",
+    "parameters": "No arguments.",
+    "returns": "Number of active session actions signaled."
+  },
+  "SparkSession.cancellationHandle": {
+    "errors": "A request is not a hard deadline or proof of rollback.",
+    "example": "handle = spark.cancellation_handle()",
+    "notes": "",
+    "parameters": "No arguments; obtain on the owning thread.",
+    "returns": "Thread-safe control handle for cooperative cancellation."
+  },
+  "SparkSession.cancellation_handle": {
+    "errors": "A request is not a hard deadline or proof of rollback.",
+    "example": "handle = spark.cancellation_handle()",
+    "notes": "",
+    "parameters": "No arguments; obtain on the owning thread.",
+    "returns": "Thread-safe control handle for cooperative cancellation."
+  },
+  "SparkSession.catalog": {
+    "errors": "Unavailable operations may be absent or raise an error.",
+    "example": "spark.catalog",
+    "notes": "A property; listTables returns names rather than PySpark Table objects.",
+    "parameters": "Property; no call arguments.",
+    "returns": "Catalog"
+  },
+  "SparkSession.conf": {
+    "errors": "Unavailable operations may be absent or raise an error.",
+    "example": "spark.conf",
+    "notes": "Retaining a Spark key does not imply its subsystem exists.",
+    "parameters": "Property; no call arguments.",
+    "returns": "RuntimeConfig"
+  },
+  "SparkSession.createDataFrame": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "spark.createDataFrame([(1,), (None,)], T.StructType([T.StructField(\"id\", T.LongType())]))",
+    "notes": "",
+    "parameters": "data: rows, dictionaries, tuples or supported pandas/Arrow input; schema: omitted, names or StructType. Prefer explicit types for empty/null/mixed input. verifySchema/verify_schema validates supported schema conversions; samplingRatio is retained for list/dict input without sampling.",
+    "returns": "A local DataFrame attached to the session."
+  },
+  "SparkSession.create_dataframe_from_rows": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "spark.createDataFrame([(1,), (None,)], T.StructType([T.StructField(\"id\", T.LongType())]))",
+    "notes": "",
+    "parameters": "data: rows, dictionaries, tuples or supported pandas/Arrow input; schema: omitted, names or StructType. Prefer explicit types for empty/null/mixed input. verifySchema/verify_schema validates supported schema conversions; samplingRatio is retained for list/dict input without sampling.",
+    "returns": "A local DataFrame attached to the session."
+  },
+  "SparkSession.newSession": {
+    "errors": "Native session creation errors.",
+    "example": "other = spark.newSession()",
+    "notes": "",
+    "parameters": "No arguments.",
+    "returns": "A new local session with isolated temporary state and no attached external provider."
+  },
+  "SparkSession.range": {
+    "errors": "Invalid/zero steps or exceeding SPARKLESS_MAX_RANGE_ROWS raises an error.",
+    "example": "spark.range(1, 5, 2).collect()",
+    "notes": "",
+    "parameters": "start, optional exclusive end and step; one argument means 0..start; step defaults to 1 and cannot be zero.",
+    "returns": "A DataFrame with a long id column."
+  },
+  "SparkSession.read": {
+    "errors": "Unavailable operations may be absent or raise an error.",
+    "example": "spark.read",
+    "notes": "A property; use spark.read.csv(path), not spark.read().",
+    "parameters": "Property; no call arguments.",
+    "returns": "DataFrameReader"
+  },
+  "SparkSession.setExternalCatalogProvider": {
+    "errors": "Invalid protocol, descriptor and callback errors; write outcomes may be unknown.",
+    "example": "spark.set_external_catalog_provider(provider)",
+    "notes": "Read the provider tutorial before implementing writes.",
+    "parameters": "provider: ownership/metadata provider, optionally with batch writer; None detaches.",
+    "returns": "None; session owns a strong provider reference."
+  },
+  "SparkSession.set_external_catalog_provider": {
+    "errors": "Invalid protocol, descriptor and callback errors; write outcomes may be unknown.",
+    "example": "spark.set_external_catalog_provider(provider)",
+    "notes": "Read the provider tutorial before implementing writes.",
+    "parameters": "provider: ownership/metadata provider, optionally with batch writer; None detaches.",
+    "returns": "None; session owns a strong provider reference."
+  },
+  "SparkSession.sql": {
+    "errors": "SQL/unsupported statement/feature errors; see SQL dialect reference.",
+    "example": "spark.sql(\"SELECT 1 AS value\").collect()",
+    "notes": "Local SQL is separate from remote Connect SQL; do not infer command timing across surfaces.",
+    "parameters": "query: one supported local SQL statement; native SQL feature required.",
+    "returns": "Query DataFrame; supported commands may mutate state when submitted."
+  },
+  "SparkSession.stop": {
+    "errors": "Native cleanup errors can propagate.",
+    "example": "spark.stop()",
+    "notes": "",
+    "parameters": "No arguments. Call only for a session whose lifecycle you own.",
+    "returns": "None; signals active actions and clears session state."
+  },
+  "SparkSession.table": {
+    "errors": "Missing table, provider failure, unsupported feature or schema mismatch.",
+    "example": "spark.table(\"orders\").count()",
+    "notes": "",
+    "parameters": "name: exact table/view identifier resolved by this session, its provider and warehouse.",
+    "returns": "A DataFrame for the resolved table."
+  },
+  "functions.avg": {
+    "errors": "Unsupported input type, missing column or aggregate context.",
+    "example": "F.avg(\"amount\").alias(\"result\")",
+    "notes": "",
+    "parameters": "column: name or Column; count(column) counts non-null values.",
+    "returns": "Aggregate Column for select/agg."
+  },
+  "functions.col": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "F.col(\"id\")",
+    "notes": "",
+    "parameters": "name: field-name string.",
+    "returns": "Column reference expression."
+  },
+  "functions.count": {
+    "errors": "Unsupported input type, missing column or aggregate context.",
+    "example": "F.count(\"amount\").alias(\"result\")",
+    "notes": "",
+    "parameters": "column: name or Column; count(column) counts non-null values.",
+    "returns": "Aggregate Column for select/agg."
+  },
+  "functions.lit": {
+    "errors": "TypeError/ValueError for invalid arguments; SparklessError for native planning or execution failures. Invalid names/types may fail at an action.",
+    "example": "F.lit(\"paid\")",
+    "notes": "",
+    "parameters": "value: supported scalar literal.",
+    "returns": "Literal Column."
+  },
+  "functions.max": {
+    "errors": "Unsupported input type, missing column or aggregate context.",
+    "example": "F.max(\"amount\").alias(\"result\")",
+    "notes": "",
+    "parameters": "column: name or Column; count(column) counts non-null values.",
+    "returns": "Aggregate Column for select/agg."
+  },
+  "functions.min": {
+    "errors": "Unsupported input type, missing column or aggregate context.",
+    "example": "F.min(\"amount\").alias(\"result\")",
+    "notes": "",
+    "parameters": "column: name or Column; count(column) counts non-null values.",
+    "returns": "Aggregate Column for select/agg."
+  },
+  "functions.sum": {
+    "errors": "Unsupported input type, missing column or aggregate context.",
+    "example": "F.sum(\"amount\").alias(\"result\")",
+    "notes": "",
+    "parameters": "column: name or Column; count(column) counts non-null values.",
+    "returns": "Aggregate Column for select/agg."
+  },
+  "functions.udf": {
+    "errors": "Python callback/conversion errors; unsupported contexts.",
+    "example": "double = F.udf(lambda x: None if x is None else x * 2, T.LongType())",
+    "notes": "Materializes input; no public pandas/grouped/remote UDF contract.",
+    "parameters": "f=None callable; returnType=None defaults to string; use an explicit DataType object.",
+    "returns": "Callable that builds a local scalar UDF Column."
+  },
+  "functions.when": {
+    "errors": "Invalid condition/value or incompatible branch types.",
+    "example": "F.when(F.col(\"id\") > 1, F.lit(\"large\")).otherwise(F.lit(\"small\"))",
+    "notes": "",
+    "parameters": "condition: Boolean Column; value: supported value or Column.",
+    "returns": "Conditional builder; chain when/otherwise, not then."
+  }
+}

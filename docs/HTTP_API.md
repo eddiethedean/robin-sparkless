@@ -56,7 +56,7 @@ options and the [deployment runbook](PRODUCTION.md) for long lived servers.
 | GET `/capabilities` | None | Effective transports, instance ID, protocol versions, SQL allowlist, limits |
 | POST `/statements` | JSON fields below | Result envelope or error; inspect body status |
 | POST `/close` | `{"session":"tutorial"}` | `{"status":"ok"}`; closes session and its local views |
-| POST `/operations/status` | Instance and operation IDs | Current retained mutation record; 404 unknown, 409 wrong instance |
+| POST `/operations/status` | Instance and operation IDs | Direct mutation-record object (no outer `operation` wrapper); 404 unknown, 409 wrong instance |
 
 All POSTs require JSON Content-Type and valid bounded bodies. Identifiers must
 be 1–128 safe ASCII bytes. HTTP session IDs cannot start `connect:`; operation
@@ -103,6 +103,9 @@ operation404; draining/admission exhaustion can use503. Result limits fail rathe
 than silently truncate. Use `ename` for classification; messages are diagnostic.
 
 ## Mutation retry and recovery
+
+The [recovery cookbook](WRITE_RECOVERY.md#http-save-inspect-replay) includes a
+complete same-instance status/replay and restart-boundary example.
 
 Fetch `server_instance_id` from capabilities, persist it with your new operation
 ID and exact request, then submit. Inspect the response's `operation` record:

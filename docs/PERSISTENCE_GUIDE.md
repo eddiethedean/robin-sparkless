@@ -1,6 +1,7 @@
 # Persistence Between Sessions
 
-Robin Sparkless supports two optional persistence mechanisms that align with PySpark:
+The local library supports two optional persistence mechanisms. Server storage has
+a separate [backend-specific lifetime](WRITE_RECOVERY.md).
 
 | Option | Scope | Use case |
 |--------|-------|----------|
@@ -147,38 +148,43 @@ let users = spark2.table("users")?;
 assert_eq!(users.count()?, 2);
 ```
 
-### Python
+### Python: verify independent processes
 
-```python
-import sparkless as rs
+Download [warehouse_roundtrip.py](https://github.com/eddiethedean/robin-sparkless/blob/main/examples/python/warehouse_roundtrip.py)
+and run it in the environment where you installed Sparkless:
 
-warehouse = "/tmp/robin_warehouse"
-spark1 = rs.SparkSession.builder \
-    .app_name("w1") \
-    .config("spark.sql.warehouse.dir", warehouse) \
-    .get_or_create()
-
-df = spark1.createDataFrame([(1, 25, "Alice"), (2, 30, "Bob")], ["id", "age", "name"])
-df.write.saveAsTable("users", mode="error")
-
-# New session reads from warehouse
-spark2 = rs.SparkSession.builder \
-    .app_name("w2") \
-    .config("spark.sql.warehouse.dir", warehouse) \
-    .get_or_create()
-
-users = spark2.table("users")
-assert users.count() == 2
+```bash
+python warehouse_roundtrip.py
 ```
+
+The parent creates a temporary warehouse, starts a writer process, waits for it
+to stop, and starts a separate reader process. The reader checks both values and
+the long `id` schema. Expect
+`warehouse values and schema survived independent process restart`.
+The temporary warehouse is removed only after both children exit.
+
+For separate manual runs with your own destination:
+
+```bash
+python warehouse_roundtrip.py write ./example-warehouse
+python warehouse_roundtrip.py read ./example-warehouse
+```
+
+The writer uses explicit `mode("error")`; rerunning it against the same table
+fails instead of replacing data. Choose a fresh warehouse for another demo.
+Both commands resolve the warehouse to an absolute path.
 
 ### Save modes
 
 | Mode | Behavior |
 |------|----------|
-| `error` (default) | Fail if table already exists |
+| `error` / `errorifexists` | Fail if table already exists |
 | `overwrite` | Replace existing table |
 | `append` | Add rows; schemas must match |
 | `ignore` | No-op if table exists |
+
+The Python writer initially uses overwrite, including `saveAsTable`; explicitly
+choose a mode. The Rust method receives its `SaveMode` argument explicitly.
 
 ### Storage layout
 
@@ -212,3 +218,27 @@ Tables are stored as:
 
 - [PERSISTENCE_BETWEEN_SESSIONS.md](PERSISTENCE_BETWEEN_SESSIONS.md) — Design notes
 - [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md) — Known divergences from PySpark
+
+## Storage and concurrency contract
+
+- Temp views are session-local; global temp views are in-memory and process-global.
+  Neither is durable. Stop sessions you own after use.
+- A warehouse stores table data as Parquet and registers local saved tables. This
+  is not a Hive metastore or a transaction coordinator across processes.
+- The implementation stages warehouse replacements, but there is no documented
+  multi-process writer lock or crash-recovery journal. Use one writer process per
+  warehouse/table and serialize write access outside the library. Readers should
+  reopen after a completed write; an existing lazy plan is not a freshness guarantee.
+- Append validates the existing table schema; `mergeSchema` and `overwriteSchema`
+  affect supported saveAsTable paths. Validate nullability and logical type metadata
+  across restarts; do not treat ordinary Parquet inference as application validation.
+- `catalog.dropTable` removes the saved-table registration. It is not a dependable
+  filesystem deletion API: warehouse data can remain discoverable. Stop users of
+  the warehouse and manage its files explicitly when retiring test data.
+- A failed or interrupted write does not establish a safe application retry policy.
+  Inspect the destination and reconcile before resubmitting. Back up persistent
+  warehouses before changing schema or replacing important data.
+
+For durable transactional external storage, use a provider with its own commit
+and reconciliation contract. DuckDB execution receipts are a **server** feature
+and do not supply exactly-once recovery to local warehouse writes.

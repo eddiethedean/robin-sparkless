@@ -88,3 +88,7 @@ harness = false
 [[example]]
 name = "jdbc_postgres"
 required-features = ["jdbc"]
+
+[[example]]
+name = "user_guide"
+required-features = ["sql"]

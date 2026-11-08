@@ -1,6 +1,6 @@
 # robin-sparkless-polars
 
-Polars-backed implementation of [robin-sparkless](https://github.com/eddiethedean/robin-sparkless): `SparkSession`, `DataFrame`, `DataFrameReader`, `Column`, expression functions, UDFs, and plan execution. This is the **only crate in the workspace that depends on Polars**; the root crate is a thin facade that re-exports the public API.
+Polars-backed implementation of [robin-sparkless](https://github.com/eddiethedean/robin-sparkless): `SparkSession`, `DataFrame`, `DataFrameReader`, `Column`, expression functions, UDFs, and plan execution. Physical execution lives here and in the optional JDBC/Polars adapter; core contracts remain independent of Polars. The root crate is a facade that re-exports the public API.
 
 For current dependency status and consumer guidance, see the versioned
 [security guide](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/SECURITY.md).

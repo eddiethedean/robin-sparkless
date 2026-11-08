@@ -5,6 +5,10 @@ environment. The project primarily targets local development and testing.
 See the [support policy](SUPPORT.md) and [support matrix](SUPPORT_MATRIX.md)
 for compatibility and deployment scope.
 
+For a runnable container and persistent-volume exercise, follow
+[the container tutorial](CONTAINERS.md). For ambiguous writes, use the
+[recovery cookbook](WRITE_RECOVERY.md).
+
 ## Deployment boundary
 
 Use the packaged native executable or repository-built image on a supported

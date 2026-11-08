@@ -1,9 +1,10 @@
-//! Optional, read-only DuckDB catalog integration for Polars.
+//! Optional DuckDB catalog sources and bounded Connect execution ownership.
 //!
 //! Sources can be standalone local files or DuckDB owners served over Quack. The catalog never
 //! accepts a path, URI, extension, or credential from a table identifier: the server supplies a
 //! trusted alias-to-source map. A statement uses one DuckDB read transaction and exports typed
-//! Arrow IPC batches before Polars evaluates its relational plan.
+//! Arrow IPC batches before Polars evaluates its relational plan. Source aliases stay read-only;
+//! the separate execution owner supports bounded queries, transactional writes and durable receipts.
 
 /// Maximum number of source rows admitted by one DuckDB-backed Connect operation.
 pub const DUCKDB_SOURCE_MAX_ROWS: u64 = 1_000_000;

@@ -9,6 +9,12 @@ python -m pip install "sparkless==4.20.0"
 
 | Script | Description |
 |--------|-------------|
+| [api_workflows.py](api_workflows.py) | Nulls, conditionals, joins, aggregation, windows and Arrow (requires PyArrow) |
+| [warehouse_roundtrip.py](warehouse_roundtrip.py) | Separate writer/reader processes with disposable warehouse |
+| [external_provider.py](external_provider.py) | Delta provider commit, receipt and rejected-prefix validation (requires PyArrow and native Delta) |
+| [jdbc_sqlite.py](jdbc_sqlite.py) | Independent SQLite read/write verification (requires a native `sqlite` build) |
+| [http_recovery.py](http_recovery.py) | Same-instance HTTP replay and restart boundary (requires base server) |
+| [duckdb_execution.py](duckdb_execution.py) | Connect writes, independent DuckDB read and restart (requires DuckDB server/client) |
 | [basic_usage.py](basic_usage.py) | Create DataFrame, filter, aggregate, show |
 | [sql_and_temp_views.py](sql_and_temp_views.py) | Temp views and `spark.sql()` |
 | [connect_load_query.py](connect_load_query.py) | Load CSV rows over Spark Connect, filter/project/count, export JSON |
@@ -59,3 +65,8 @@ The identity test unwraps the plugin's JDBC session adapter and verifies the
 actual PySpark session plus a live JVM witness. See the
 [pipeline tutorial](../../docs/PIPELINE_TUTORIAL.md) and
 [package install instructions](../../docs/INSTALLATION.md).
+
+Complete example dependencies and continuous-check profiles are recorded in the
+[executable inventory](../../docs/EXAMPLES.md). The local wheel does not enable
+SQLite; follow [native feature setup](../../docs/INSTALLATION.md#platforms-and-build-features)
+for that example. Server product platforms differ from local-engine platforms.

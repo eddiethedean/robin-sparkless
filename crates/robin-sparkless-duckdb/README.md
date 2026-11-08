@@ -1,9 +1,10 @@
 # robin-sparkless-duckdb
 
-Optional, read-only DuckDB catalog source for Robin Sparkless. It maps trusted
+Optional DuckDB catalog and execution integration for Robin Sparkless. It maps trusted
 standalone database files or a configured shared Quack owner to the engine's
 Arrow IPC catalog contract. It is independent of the Polars execution crate and
-does not provide DuckDB query execution or writes.
+also exposes the bounded execution owner and transactional write/receipt APIs used
+by the optional DuckDB Connect backend. Source aliases themselves remain read-only.
 
 Use the [DuckDB source guide](https://robin-sparkless.readthedocs.io/en/latest/DUCKDB_SOURCE/)
 for server configuration and the [execution guide](https://robin-sparkless.readthedocs.io/en/latest/DUCKDB_EXECUTION/)

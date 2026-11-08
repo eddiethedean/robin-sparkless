@@ -1,5 +1,8 @@
 # Troubleshooting Python
 
+For structured codes and retry decisions, see [errors](ERRORS.md). For uncertain
+write outcomes, follow [recovery](WRITE_RECOVERY.md) before resubmitting.
+
 Start by recording the exact interpreter, distribution, and native module:
 
 ```bash

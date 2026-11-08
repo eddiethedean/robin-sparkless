@@ -1,22 +1,44 @@
 # Rust API reference — 4.20.0
 
-Build rustdoc for every workspace crate from the published source tag. Use the
-repository-pinned Rust toolchain, **1.93.1**. This works independently of hosted
-builds or artifact retention.
+## Browse or download
+
+The [versioned docs.rs route](https://docs.rs/robin-sparkless/4.20.0/robin_sparkless/)
+identifies the published crate. If hosted generation is unavailable, download
+`rust-api-docs` from the **CI** workflow, or prepare the complete
+`browsable-documentation-bundle` with the **Prepare or publish browsable documentation**
+workflow. Both build with the pinned Rust 1.93.1 toolchain; they require no Rust
+installation on the reader's machine once downloaded.
+
+The complete bundle contains `rust-api/4.20.0/robin_sparkless/index.html` and the
+engine-neutral core reference. Open those files locally or serve the directory
+with `python -m http.server`. `documentation-build.json` records the source SHA,
+version, selected features and whether the source tree was modified. Download
+artifacts from the run matching the version/source you are evaluating.
+
+The publication workflow is manual and defaults to **build only**. After setting
+up GitHub Pages for Actions in the repository, a maintainer can dispatch it on
+`main` with `publish=true`. The Pages environment controls deployment approval.
+Use the deployment output URL plus `rust-api/4.20.0/robin_sparkless/` for the
+actual hosted route; do not claim it is available until verified. Save each
+release bundle before replacing a Pages deployment; an individual deployment
+contains the built version, not a permanent archive of every previous release.
+See [publication verification](DOCUMENTATION.md#verify-hosted-publication).
+
+## Minimal local build
+
+Build only the facade and core first. SQL is enabled; optional Delta/database
+APIs are not all included in this smaller reference.
 
 ```bash
 git clone --branch v4.20.0 --depth 1 https://github.com/eddiethedean/robin-sparkless.git
 cd robin-sparkless
-cargo doc --locked --workspace --all-features --no-deps --open
+cargo doc --locked -p robin-sparkless -p robin-sparkless-core --features robin-sparkless/sql --no-deps --open
 ```
 
-The workspace index is `target/doc/index.html`; the facade entry page is
-`target/doc/robin_sparkless/index.html`. `--all-features` shows APIs behind
-optional SQL, Delta, database, and server features. CI currently retains a
-smaller `rust-api-docs` artifact for the root facade only, built with
-`cargo doc --locked -p robin-sparkless --features sql --no-deps`. The
-[4.20.0 docs.rs API route](https://docs.rs/robin-sparkless/4.20.0/robin_sparkless/)
-was unavailable at review. The [source tag](https://github.com/eddiethedean/robin-sparkless/tree/v4.20.0)
+Open `target/doc/robin_sparkless/index.html`. For a feature-expanded reference,
+run `cargo doc --locked --workspace --all-features --no-deps`; that requires the
+native dependencies for every selected driver. First builds can be substantial.
+The [source tag](https://github.com/eddiethedean/robin-sparkless/tree/v4.20.0)
 and [crate listing](https://crates.io/crates/robin-sparkless/4.20.0) identify the release.
 
 ## Choose your API
@@ -34,4 +56,4 @@ and [crate listing](https://crates.io/crates/robin-sparkless/4.20.0) identify th
 Start with the complete [quickstart](QUICKSTART.md). Feature flags are part of
 the API contract: SQL, Delta, and database drivers are opt-in for Rust consumers.
 See the [security guide](SECURITY.md#known-dependency-exception) for the scope of
-historical dependency exceptions and the lockfile used by 4.19.0.
+historical dependency exceptions; audit your application's own resolved lockfile.

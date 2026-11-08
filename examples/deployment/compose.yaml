@@ -1,0 +1,36 @@
+services:
+  base:
+    image: ghcr.io/eddiethedean/sparkless-server:v4.20.0
+    platform: linux/amd64
+    ports:
+      - "127.0.0.1:8099:8099"
+      - "127.0.0.1:15002:15002"
+    mem_limit: 512m
+    cpus: 2
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    stop_grace_period: 20s
+
+  duckdb:
+    profiles: [duckdb]
+    image: ghcr.io/eddiethedean/sparkless-server-duckdb:v4.20.0
+    platform: linux/amd64
+    user: "${SPARKLESS_DOC_UID:-65532}:${SPARKLESS_DOC_GID:-65532}"
+    environment:
+      SPARKLESS_EXECUTION_BACKEND: duckdb
+      SPARKLESS_DUCKDB_EXECUTION_OWNER: '{"mode":"local","database_path":"/data/events.duckdb"}'
+    ports:
+      - "127.0.0.1:18099:8099"
+      - "127.0.0.1:25002:15002"
+    volumes:
+      - ./data:/data
+    mem_limit: 512m
+    cpus: 2
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /.duckdb:exec,uid=${SPARKLESS_DOC_UID:-65532},gid=${SPARKLESS_DOC_GID:-65532}
+    stop_grace_period: 20s

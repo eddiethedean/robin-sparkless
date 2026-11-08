@@ -5,11 +5,12 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
-import re
 import shutil
 import subprocess
 import sys
 import tempfile
+
+from run_documentation_examples import run_profile
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -48,24 +49,8 @@ def main() -> None:
                 subprocess.run(
                     [sys.executable, str(work / name)], cwd=work, env=env, check=True
                 )
-            pages = [
-                "README.md",
-                "python/README.md",
-                "docs/UDF_GUIDE.md",
-                "docs/PYTHON_API_REFERENCE.md",
-                "docs/EXECUTION_CANCELLATION.md",
-                "docs/python_migration.md",
-            ]
-            for page in pages:
-                text = (ROOT / page).read_text()
-                for index, block in enumerate(
-                    re.findall(r"^```python\n(.*?)^```", text, re.S | re.M)
-                ):
-                    source = work / f"fence_{index}.py"
-                    source.write_text(block)
-                    subprocess.run(
-                        [sys.executable, str(source)], cwd=work, env=env, check=True
-                    )
+            run_profile("local")
+            run_profile("provider")
             print("README and reference fences executed against", sparkless.__file__)
 
 

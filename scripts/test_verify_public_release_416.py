@@ -25,9 +25,8 @@ def release_metadata(project, version="4.16.0"):
     wheel_project = project.replace("-", "_")
     wheel_python_abi = (
         "py3-none"
-        if project in {"sparkless-server-bin", "sparkless-testing"} or (
-            split and project == "sparkless"
-        )
+        if project in {"sparkless-server-bin", "sparkless-testing"}
+        or (split and project == "sparkless")
         else "cp311-abi3"
         if split
         else "cp38-abi3"

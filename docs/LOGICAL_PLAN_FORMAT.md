@@ -70,8 +70,9 @@ Each entry in `aggs` is one aggregation:
 - Optional `alias`: output column name (e.g. `"sum(v)"`, `"count(v)"` for PySpark-style names).
 
 Plan aggregation entries support `sum`, `count`, `avg`, `min`, `max`, `first`, and `last`,
-or an `expr` expression tree. Python grouped UDF aggregation is available through the
-DataFrame API and is not supported by `execute_plan`.
+or an `expr` expression tree. Public Python grouped/vectorized UDF aggregation is
+unsupported by both the DataFrame API and `execute_plan`. Local typed scalar UDFs
+have the separate [documented context limits](UDF_GUIDE.md).
 
 ### join
 

@@ -28,6 +28,11 @@ as fully implemented merely because it imports.
 
 ## Checks
 
+Use the contributor environment including `python/connect`, `build` and the docs
+requirements. API generation imports the local API and shared launcher; a
+runtime-only Sparkless install is not a documentation authoring environment.
+
+
 ```bash
 uv run --no-project --with-requirements docs/requirements.txt python scripts/check_documentation.py
 uv run --no-project --with-requirements docs/requirements.txt mkdocs build --strict
@@ -39,7 +44,9 @@ Review generated changes; do not blindly bless them. CI checks links/anchors,
 Python fence syntax and complete TOML snippets, zero MkDocs warnings, the
 signature/compatibility inventories and installed-wheel executable examples.
 Examples run outside the checkout, with identity checks on Sparkless, PySpark 3.5
-and 4.0.5. Rustdoc is generated with the pinned toolchain and retained as an artifact.
+and 4.0.5. Rustdoc is generated for the facade and core with the pinned toolchain, and the
+compiled guide sources are checked against their complete fences. The
+[example manifest](EXAMPLES.md) defines which programs run in each environment.
 Static syntax checks do not establish that arbitrary prose snippets execute;
 promote adoption-critical examples into the executable example set.
 
@@ -55,7 +62,12 @@ or provide a redirect/signpost when renaming a current page.
 ## Release documentation checklist
 
 - Match package/crate/server versions and supported Python/platform floors.
-- Reconcile support matrix, FAQ, migration, UDF/catalog and transport claims.
+- Reconcile support matrix, deferred scope, differences, SQL, architecture,
+  operations, FAQ, migration and UDF/catalog claims by product/backend/transport.
+- Check writer defaults, accepted-without-effect options, storage lifetimes and
+  unknown commit outcomes against implementation; no blanket cross-surface claims.
+- Feature author updates contracts/examples; documentation reviewer checks them;
+  release maintainer records publication verification ([responsibilities](MAINTAINING.md)).
 - Regenerate runtime symbols/compatibility inventory and run executable examples.
 - Verify stable/candidate availability and public install commands against indexes.
 - Verify the actual versioned docs.rs route; retain explicit fallback if it fails.
@@ -95,3 +107,44 @@ or provide a redirect/signpost when renaming a current page.
 Keep historical plans in the archive, including the status and results as
 recorded at each checkpoint. Use the support matrix and release evidence for
 current product claims.
+
+## Build the browsable bundle
+
+From the contributor environment and repository root:
+
+```bash
+.venv/bin/python -m mkdocs build --strict --site-dir /tmp/sparkless-docs-site
+cargo doc --locked -p robin-sparkless -p robin-sparkless-core --features robin-sparkless/sql --no-deps
+.venv/bin/python scripts/build_documentation_bundle.py --site /tmp/sparkless-docs-site
+```
+
+The bundle contains a versioned Rust reference and a source/feature build record.
+The manual publication workflow defaults to preparing a downloadable artifact;
+only an explicit publish dispatch on main can deploy to the configured Pages
+site. Retain release bundles independently of CI's finite artifact retention.
+
+## Verify hosted publication
+
+After the Read the Docs build and optional Rust deployment finish, verify actual
+HTML independently for `latest` and `stable`, not just badge status:
+
+```bash
+.venv/bin/python scripts/verify_hosted_documentation.py --expected 4.20.0 \
+  --report /tmp/sparkless-hosted-docs.json
+```
+
+Add `--rust-url` with the actual deployed versioned facade URL to verify it too.
+The checker fails on missing/mismatched version banners or an unavailable route.
+Record its report with release evidence; an unreachable host or stale alias is
+an open publication issue. A local strict build cannot establish hosted freshness.
+
+## Authored contracts and fragments
+
+Edit `docs/reference/python-api-contracts.json` for per-symbol parameters,
+returns, errors, example fragments and caveats, then regenerate the symbol page.
+The checker rejects contracts that name absent inventory entries. Unreviewed
+symbols remain explicitly labeled; adding a signature does not confer support.
+A complete example must be in `docs/reference/examples.json` and an executable
+CI profile. Review fixture-size and transaction boundaries, especially callbacks
+that stop consuming input. Update release metadata only after the stated review;
+archived pages display a historical-record notice rather than a current review claim.

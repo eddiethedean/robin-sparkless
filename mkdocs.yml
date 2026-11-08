@@ -70,59 +70,73 @@ markdown_extensions:
 nav:
   - Start here:
     - Overview: index.md
+    - Choose your workflow: DOC_INDEX.md
     - Install Sparkless: INSTALLATION.md
     - Python quickstart: python_getting_started.md
-    - Migrate from PySpark, Sparkless 3, or 4.18: python_migration.md
     - Before you adopt: BEFORE_YOU_ADOPT.md
     - Support matrix: SUPPORT_MATRIX.md
+    - Upgrade paths: UPGRADING.md
     - FAQ: FAQ.md
-  - Develop and test locally:
-    - Test with Sparkless and PySpark: TESTING_GUIDE.md
-    - File pipeline tutorial: PIPELINE_TUTORIAL.md
-    - 4.19 Rust and package changes: MIGRATION_4_19.md
-    - 4.20 migration: MIGRATION_4_20.md
+  - Tutorials and how-to:
+    - First DataFrame test: TESTING_GUIDE.md
+    - File pipeline: PIPELINE_TUTORIAL.md
+    - Compare DataFrames: TESTING_COMPARISONS.md
     - Persistence and tables: PERSISTENCE_GUIDE.md
     - Scalar UDFs: UDF_GUIDE.md
-    - External catalogs: EXTERNAL_CATALOGS.md
+    - Build a catalog provider: PROVIDER_TUTORIAL.md
     - Troubleshooting: TROUBLESHOOTING_PYTHON.md
   - Reference:
     - Local Python API: PYTHON_API_REFERENCE.md
+    - Python symbols and contracts: PYTHON_API_SYMBOLS.md
     - Testing helpers API: TESTING_PYTHON_API.md
-    - Python symbols and signatures: PYTHON_API_SYMBOLS.md
-    - Types and errors: TYPES_AND_ERRORS.md
+    - Testing fixtures and markers: TESTING_FIXTURES.md
+    - SQL dialects: SQL_REFERENCE.md
+    - File formats and writer options: FILE_IO.md
+    - Types and schemas: TYPES_AND_ERRORS.md
+    - Error codes and recovery decisions: ERRORS.md
     - Configuration: CONFIGURATION.md
+    - External catalog contract: EXTERNAL_CATALOGS.md
     - Compatibility evidence: PARITY_STATUS.md
     - Compatibility profiles: PYSPARK_COMPAT_PROFILES.md
     - PySpark differences: PYSPARK_DIFFERENCES.md
     - Deferred scope: DEFERRED_SCOPE.md
     - Cancellation: EXECUTION_CANCELLATION.md
     - Typing: TYPING_GUIDE.md
-  - Rust and extensions:
+  - Rust:
     - Quick start: QUICKSTART.md
-    - User guide: USER_GUIDE.md
+    - Column API user guide: USER_GUIDE.md
     - Rust API reference: RUST_API_REFERENCE.md
-    - Embedding: EMBEDDING.md
+    - ExprIr embedding: EMBEDDING.md
     - Extension author guide: EXTENDING.md
-    - Product architecture: ARCHITECTURE.md
-    - Engine architecture: ENGINE_ARCHITECTURE.md
     - Logical plan format: LOGICAL_PLAN_FORMAT.md
-    - Database integration tests: JDBC_TESTING.md
+    - Database integration: JDBC_TESTING.md
   - Run a server:
     - Spark Connect quickstart: SPARK_CONNECT.md
     - Read DuckDB tables: DUCKDB_SOURCE.md
-    - DuckDB Connect execution (4.20.0): DUCKDB_EXECUTION.md
+    - DuckDB Connect execution: DUCKDB_EXECUTION.md
     - HTTP quickstart and API: HTTP_API.md
     - Python launcher API: SERVER_PYTHON_API.md
+    - Write recovery: WRITE_RECOVERY.md
+    - Containers and restart tutorial: CONTAINERS.md
     - Deployment and operations: PRODUCTION.md
     - Performance and sizing: PERFORMANCE.md
-  - Project:
+  - Contribute and release:
+    - Contributor setup: https://github.com/eddiethedean/robin-sparkless/blob/main/CONTRIBUTING.md
+    - Add a regression: TEST_CREATION_GUIDE.md
+    - Repository and application CI: TESTING_CI.md
+    - Product architecture: ARCHITECTURE.md
+    - Engine architecture: ENGINE_ARCHITECTURE.md
+    - Documentation maintenance: DOCUMENTATION.md
+    - Executable example inventory: EXAMPLES.md
+    - Maintainer responsibilities: MAINTAINING.md
+    - Release process: RELEASING.md
+  - Releases and project:
     - Support and versions: SUPPORT.md
+    - Release notes: https://github.com/eddiethedean/robin-sparkless/blob/main/CHANGELOG.md
+    - Release evidence: RELEASE_EVIDENCE.md
+    - 4.20 migration: MIGRATION_4_20.md
+    - 4.19 Rust and package changes: MIGRATION_4_19.md
+    - Python import migration: python_migration.md
     - Security policy: SECURITY.md
     - 4.18 dependency exception: security/zstd-4.18-exception.md
-    - Contributing: https://github.com/eddiethedean/robin-sparkless/blob/main/CONTRIBUTING.md
-    - Add a regression: TEST_CREATION_GUIDE.md
-    - Documentation maintenance: DOCUMENTATION.md
-    - Release process: RELEASING.md
-    - Release evidence: RELEASE_EVIDENCE.md
-    - Documentation index: DOC_INDEX.md
     - History and plans: ARCHIVE.md

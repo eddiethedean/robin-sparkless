@@ -12,8 +12,7 @@ Choose the boundary before adding code:
 
 There is no general pip-installable plugin discovery or remote Python worker
 contract. Register providers explicitly with
-`spark.set_external_catalog_provider(provider)` using the provider guide's
-complete examples. Preserve schema/type/nullability and receipt validation;
+`spark.set_external_catalog_provider(provider)` using the [complete provider tutorial](PROVIDER_TUTORIAL.md). Preserve schema/type/nullability and receipt validation;
 never report cancellation after a write may have committed.
 
 Add engine behavior tests plus Python/transport tests for any exposed surface.

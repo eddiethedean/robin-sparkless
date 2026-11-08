@@ -28,7 +28,7 @@ impl SparklessConfig {
     /// - `ROBIN_SPARKLESS_WAREHOUSE_DIR` → `warehouse_dir`
     /// - `ROBIN_SPARKLESS_TEMP_DIR` → `temp_dir`
     /// - `ROBIN_SPARKLESS_CASE_SENSITIVE` → `case_sensitive` (any value that is "true" or "1" case-insensitively)
-    /// - `ROBIN_SPARKLESS_CONFIG_*` → keys in `extra`; the key is the suffix after the prefix, with underscores converted to dots (e.g. `ROBIN_SPARKLESS_CONFIG_SPARK_APP_NAME` → `spark.app.name`)
+    /// - `ROBIN_SPARKLESS_CONFIG_*` → keys in `extra`; underscores become dots and case is preserved (e.g. `ROBIN_SPARKLESS_CONFIG_spark_app_name` → `spark.app.name`)
     pub fn from_env() -> Self {
         let warehouse_dir = std::env::var("ROBIN_SPARKLESS_WAREHOUSE_DIR")
             .ok()

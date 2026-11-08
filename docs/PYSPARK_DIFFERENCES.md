@@ -45,7 +45,8 @@ write/receipt/error contract ([catalog providers](EXTERNAL_CATALOGS.md)).
 `spark.catalog` is a property. `listTables` returns names rather than Spark Table
 objects. `df.write` is a property; `saveAsTable(name, mode=None)` is the installed
 writer signature. Do not copy older binding-only `catalog()` / `write()` forms.
-HTTP supports only its allowlist; Connect SQL commands are unsupported.
+HTTP supports only its allowlist. Polars Connect does not support SQL commands;
+DuckDB execution supports the [declared SELECT/CREATE/INSERT subset](DUCKDB_EXECUTION.md#supported-request-subset).
 
 ## Readers and native features
 

@@ -11,9 +11,9 @@ for that combination; it does not assert that an internal implementation cannot 
 | Python UDF variants | Local typed scalar UDF only in documented contexts; no public pandas/vectorized/grouped UDF or UDTF | Built-in expressions or real PySpark |
 | Remote Python execution | No HTTP/Connect Python worker or UDF contract | Local trusted-process code |
 | Catalog federation / WriterV2 | No full Hive/Spark metastore or writeTo contract | Documented local warehouse/external provider |
-| Connect general Spark surface | No SQL commands, general joins or aggregates, sorts/windows, file sources, writes, artifacts or streaming | Use the [Connect support contract](SPARK_CONNECT.md#supported-request-surface) for supported inner joins and grouped count/sum |
+| Connect general Spark surface | Polars mode has no SQL-command/write contract. DuckDB execution accepts only declared SELECT, typed CREATE TABLE and literal INSERT forms; no general joins/aggregates, sorts/windows, file sources, DataFrame writers, artifacts or streaming | [Connect support](SPARK_CONNECT.md#supported-request-surface) and [DuckDB subset](DUCKDB_EXECUTION.md#supported-request-subset) |
 | HTTP general SQL/IO | Bounded allowlist and in-memory catalog; no arbitrary filesystem/JDBC/Python execution | Local library or appropriate service |
-| Durable server recovery | No cross-restart catalog/operation journal or durable exactly-once guarantee | Application reconciliation and durable infrastructure |
+| Durable server recovery | Polars mode loses managed tables and operation records on restart. DuckDB execution persists tables and write receipts; sessions and retained query results remain ephemeral | [Write recovery](WRITE_RECOVERY.md); replay requires the original identity and unchanged request |
 | Hard query isolation | No in-process hard CPU/intermediate-memory enforcement | Separate OS-limited processes |
 | XML/XPath, advanced sketches/NLP | No reviewed complete public compatibility contract | Preprocess externally or add explicit oracle tests |
 | Advanced Spark4 variants/collations/UDTF combinations | Unlisted combinations are unknown; type names alone do not prove semantics | Validate exact API/type/context against your oracle |

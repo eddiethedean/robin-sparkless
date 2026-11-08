@@ -35,29 +35,29 @@ pub struct JdbcOptions {
     /// Optional driver class / dialect hint (PySpark: `driver`).
     pub driver: Option<String>,
 
-    /// Column used for partitioned reads (PySpark: `partitionColumn`).
+    /// Compatibility field (`partitionColumn`); adapters do not implement partitioned reads.
     pub partition_column: Option<String>,
 
-    /// Lower bound for partitioning (PySpark: `lowerBound`).
+    /// Compatibility-only partition bound (`lowerBound`); no partitioned execution effect.
     pub lower_bound: Option<i64>,
 
-    /// Upper bound for partitioning (PySpark: `upperBound`).
+    /// Compatibility-only partition bound (`upperBound`); no partitioned execution effect.
     pub upper_bound: Option<i64>,
 
-    /// Number of partitions (PySpark: `numPartitions`).
+    /// Compatibility-only partition count (`numPartitions`); no partitioned execution effect.
     pub num_partitions: Option<i32>,
 
-    /// JDBC fetch size (PySpark: `fetchsize`).
+    /// Requested fetch size (`fetchsize`); only PostgreSQL attempts a setting, not a verified fetch bound.
     pub fetch_size: Option<i32>,
 
-    /// Batch size for writes (PySpark: `batchsize`).
+    /// Driver-specific write batch size (`batchsize`); SQL Server uses it for progress reporting.
     pub batch_size: Option<i32>,
 
     // --- New PySpark JDBC options ---
     /// SQL to execute after opening connection (PySpark: `sessionInitStatement`).
     pub session_init_statement: Option<String>,
 
-    /// Query timeout in seconds (PySpark: `queryTimeout`).
+    /// Driver-specific timeout in seconds (`queryTimeout`); SQLite uses a busy timeout, DB2 ignores it.
     pub query_timeout: Option<i32>,
 
     /// SQL to execute before the main query, e.g. CTEs or temp tables (PySpark: `prepareQuery`).

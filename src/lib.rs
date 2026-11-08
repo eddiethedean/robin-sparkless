@@ -1,9 +1,10 @@
 //! Robin Sparkless - A Rust DataFrame library with PySpark-like API
 //!
-//! This library provides a PySpark-compatible API. The **root crate** is engine-agnostic:
-//! it depends on [robin-sparkless-core](https://docs.rs/robin-sparkless-core) (types, expression IR, config)
-//! and one backend—currently **robin-sparkless-polars**, which uses [Polars](https://www.pola.rs/)
-//! for execution. The public API exposes engine-agnostic expression types where possible.
+//! This library provides a PySpark-style API. The **root crate** is a concrete Polars-backed
+//! facade. [robin-sparkless-core](https://docs.rs/robin-sparkless-core) owns engine-neutral
+//! types, expression IR and configuration; **robin-sparkless-polars** executes plans on
+//! [Polars](https://www.pola.rs/). The public API offers both engine-neutral expressions
+//! and explicit Polars/Column interfaces as described below.
 //!
 //! # Expression APIs
 //!
@@ -36,8 +37,11 @@
 //!
 //! # API stability
 //!
-//! While the crate is in the 0.x series, we follow [semver](https://semver.org/) but may introduce
-//! breaking changes in minor releases (e.g. 0.1 → 0.2) until 1.0. For behavioral caveats and
+//! Sparkless 4.x does not guarantee source compatibility across minor releases. Minor releases
+//! can change Rust interfaces, Python package boundaries, and supported behavior. Pin the
+//! version validated by your application and read its migration guide before upgrading.
+//! In particular, 4.19 includes breaking changes despite its minor-version number.
+//! For behavioral caveats and
 //! intentional differences from PySpark, see the [repository documentation](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/PYSPARK_DIFFERENCES.md).
 
 #![allow(clippy::collapsible_if)]

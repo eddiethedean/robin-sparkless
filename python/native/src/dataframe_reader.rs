@@ -308,14 +308,12 @@ impl PyDataFrameReader {
         Ok(wrapped)
     }
 
-    /// PySpark: jdbc(url, table, properties=None, ...). Reads from a JDBC data source.
+    /// jdbc(url, table, properties=None) reads through a compiled native database adapter.
     ///
-    /// Supports PySpark-compatible options:
-    /// - sessionInitStatement: SQL to execute after connecting
-    /// - queryTimeout: Query timeout in seconds
-    /// - prepareQuery: SQL to execute before main query
-    /// - fetchsize: Number of rows to fetch per round trip
-    /// - partitionColumn, lowerBound, upperBound, numPartitions: For partitioned reads
+    /// sessionInitStatement and prepareQuery execute configured SQL when hardening permits it.
+    /// queryTimeout has driver-specific semantics; SQLite uses a busy timeout and DB2 ignores it.
+    /// Partition options are accepted without partitioned execution. fetchsize is not a verified
+    /// fetch/materialization bound. See the documentation's per-driver option matrix.
     #[pyo3(signature = (url, table, properties=None))]
     fn jdbc(
         &self,

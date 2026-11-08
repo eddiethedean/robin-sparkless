@@ -6,6 +6,12 @@ surface, including native method documentation. A signature is not a guarantee
 of full PySpark equivalence; consult the [support matrix](SUPPORT_MATRIX.md).
 All examples use `from sparkless.sql import SparkSession, functions as F, types as T`.
 
+Run the complete [API workflow example](https://github.com/eddiethedean/robin-sparkless/blob/main/examples/python/api_workflows.py)
+with Sparkless and PyArrow installed to check null handling, conditionals, joins,
+aggregates, windows, empty schemas and bounded Arrow output. Individual generated
+contract examples are fragments; the [example inventory](EXAMPLES.md) identifies
+which programs are executed continuously.
+
 ## Session and schema
 
 | API | Parameters/defaults | Returns / behavior |
@@ -106,13 +112,16 @@ supports another scheme. Format options are a subset of Spark's.
 
 `df.write` is a property. Chain `format(fmt)`, `mode(mode)`, `option(key,value)`,
 and supported `partitionBy(*cols)`, then call `save(path)` or a format shortcut.
-Writing is an action with filesystem effects. Save modes: `error`/`errorifexists`
-(default), `overwrite`, `append`, `ignore`. Existing destinations, incompatible
-schemas, unsupported formats/options, or IO failures raise errors. `overwrite`
-can replace data; isolate output directories.
+Writing is an action with filesystem effects. **The Python writer defaults to
+`overwrite`, including `saveAsTable`.** Set a mode deliberately. For plain
+CSV/JSON/Parquet path writes, only append is distinct: other mode strings map to
+overwrite. `mode("error")` and `mode("ignore")` do not protect those paths.
+Delta path saves and `saveAsTable` have separate four-mode handling. See
+[file modes and options](FILE_IO.md#write-modes) for the exact boundary.
 
 `saveAsTable(name, mode=None)` uses the configured warehouse when present;
-otherwise saved tables are process/session scoped. See [persistence](PERSISTENCE_GUIDE.md).
+otherwise saved tables are process/session scoped. An explicit `mode` argument
+overrides the chained writer mode. See [persistence](PERSISTENCE_GUIDE.md).
 `catalog.listTables(dbName=None)` returns names, not PySpark Table objects;
 `tableExists(name)` returns bool; `dropTempView(name)` and `dropTable(name)` remove
 registrations (do not assume all external data is deleted).
