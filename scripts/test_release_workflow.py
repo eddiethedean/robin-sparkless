@@ -83,6 +83,29 @@ class ReleaseContextTests(unittest.TestCase):
 
 
 class ReleaseWorkflowTests(unittest.TestCase):
+    def test_release_gate_reuses_published_pypi_files_before_hashing_candidates(self):
+        steps = workflow("release.yml")["jobs"]["release-validation-gate"]["steps"]
+        names = [step.get("name") for step in steps]
+        reuse_index = names.index(
+            "Reuse immutable files already published for this release"
+        )
+        inventory_index = names.index("Verify complete wheel and source distribution inventory")
+        storage_index = names.index("Check current PyPI storage before publishing")
+        self.assertLess(reuse_index, inventory_index)
+        self.assertLess(inventory_index, storage_index)
+
+        reuse = steps[reuse_index]["run"]
+        for project, directory in (
+            ("sparkless", "dist/sparkless"),
+            ("sparkless-native", "dist/native"),
+            ("sparkless-connect", "dist/connect"),
+            ("sparkless-testing", "dist/testing"),
+            ("sparkless-server", "dist/server-base"),
+            ("sparkless-server-duckdb", "dist/server-duckdb"),
+        ):
+            with self.subTest(project=project):
+                self.assertIn(f"--directory {directory} --project {project}", reuse)
+
     def test_server_ci_job_allows_time_for_cold_builds(self):
         jobs = workflow("ci.yml")["jobs"]
         self.assertGreaterEqual(jobs["server-base-tests"]["timeout-minutes"], 90)

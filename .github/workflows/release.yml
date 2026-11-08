@@ -1203,6 +1203,21 @@ jobs:
         with:
           name: sparkless-connect-dist
           path: dist/connect
+      - name: Reuse immutable files already published for this release
+        shell: bash
+        run: |
+          set -euo pipefail
+          api_version="$(python -c 'import tomllib; print(tomllib.load(open("python/pyproject.toml", "rb"))["project"]["version"])')"
+          engine_version="$(python -c 'import tomllib; print(tomllib.load(open("python/native/pyproject.toml", "rb"))["project"]["version"])')"
+          connect_version="$(python -c 'import tomllib; print(tomllib.load(open("python/connect/pyproject.toml", "rb"))["project"]["version"])')"
+          server_version="$(python -c 'import tomllib; print(tomllib.load(open("python/server/pyproject.toml", "rb"))["project"]["version"])')"
+          duckdb_version="$(python -c 'import tomllib; print(tomllib.load(open("python/server-duckdb/pyproject.toml", "rb"))["project"]["version"])')"
+          python scripts/reuse_pypi_distributions.py --directory dist/sparkless --project sparkless --version "$api_version"
+          python scripts/reuse_pypi_distributions.py --directory dist/native --project sparkless-native --version "$engine_version"
+          python scripts/reuse_pypi_distributions.py --directory dist/connect --project sparkless-connect --version "$connect_version"
+          python scripts/reuse_pypi_distributions.py --directory dist/testing --project sparkless-testing --version "$api_version"
+          python scripts/reuse_pypi_distributions.py --directory dist/server-base --project sparkless-server --version "$server_version"
+          python scripts/reuse_pypi_distributions.py --directory dist/server-duckdb --project sparkless-server-duckdb --version "$duckdb_version"
       - name: Verify complete wheel and source distribution inventory
         run: |
           python3 scripts/verify_candidate_inventory.py --root . --output dist/candidate-inventory.json
