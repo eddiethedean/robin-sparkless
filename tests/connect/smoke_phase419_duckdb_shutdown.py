@@ -138,13 +138,19 @@ def main() -> None:
         server.stop()
         shutdown_seconds = time.monotonic() - shutdown_started
         diagnostics = server.diagnostics
-        if (
-            "event=duckdb_source_cancel_requested" not in diagnostics
-            or "event=duckdb_source_remote_cancel accepted=true" not in diagnostics
+        cancellation_deadline = time.monotonic() + 5
+        owner_after_shutdown = owner_states(owner)
+        while (
+            owner_after_shutdown & active_states
+            and time.monotonic() < cancellation_deadline
         ):
+            time.sleep(0.05)
+            owner_after_shutdown = owner_states(owner)
+        if owner_after_shutdown & active_states:
             raise AssertionError(
-                "server shutdown did not confirm remote Quack cancellation; "
-                f"owner_before={observed_active}, diagnostics={diagnostics!r}"
+                "server shutdown left the remote Quack query active; "
+                f"owner_before={observed_active}, owner_after={owner_after_shutdown}, "
+                f"diagnostics={diagnostics!r}"
             )
 
         worker.join(timeout=10)
@@ -176,7 +182,7 @@ def main() -> None:
                     "shutdown_cancelled_remote_query": True,
                     "shutdown_seconds": shutdown_seconds,
                     "owner_states_before_shutdown": sorted(observed_active),
-                    "remote_cancel_accepted": True,
+                    "owner_states_after_shutdown": sorted(owner_after_shutdown),
                     "server_diagnostics": diagnostics.splitlines(),
                     "client_result": result[0],
                 },
