@@ -187,6 +187,7 @@
   },
   "DataFrameReader": {
     "csv": "(self, /, path)",
+    "delta": "(self, /, path)",
     "format": "(self, /, fmt)",
     "jdbc": "(self, /, url, table, properties=None)",
     "json": "(self, /, path)",
