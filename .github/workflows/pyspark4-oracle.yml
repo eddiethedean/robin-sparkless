@@ -55,7 +55,6 @@ jobs:
           .venv/bin/pip install --no-deps -e python/connect
           .venv/bin/pip install --no-deps -e python/testing
           .venv/bin/pip install --no-deps -e python
-          cd ..
           .venv/bin/pip install -r tests/requirements-pyspark4.txt pytest pytest-xdist pytest-timeout
         working-directory: ${{ github.workspace }}
 
