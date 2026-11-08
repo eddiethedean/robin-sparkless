@@ -1624,7 +1624,8 @@ jobs:
             local candidate_dir="$RUNNER_TEMP/candidate-${product}"
             mkdir -p "$existing_dir" "$candidate_dir"
             for path in "${paths[@]}"; do
-              local filename="$(basename "$path")"
+              local filename
+              filename="$(basename "$path")"
               docker cp "$existing_container:$path" "$existing_dir/"
               docker cp "$candidate_container:$path" "$candidate_dir/"
               if ! cmp -s "$existing_dir/$filename" "$candidate_dir/$filename"; then
