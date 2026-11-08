@@ -150,36 +150,62 @@ class ReleaseWorkflowTests(unittest.TestCase):
         )
         self.assertEqual(
             token_preflight.get("if"),
-            "steps.context.outputs.publish_python == 'true' && vars.PYPI_NEW_PROJECTS == 'true'",
+            "steps.context.outputs.publish_python == 'true' && vars.PYPI_NEW_PROJECTS != ''",
         )
         self.assertEqual(
             token_preflight.get("env", {}).get("PYPI_API_TOKEN"),
             "${{ secrets.PYPI_API_TOKEN }}",
         )
-        self.assertIn('-z "${PYPI_API_TOKEN:-}"', token_preflight["run"])
-
-        existing_project_publishers = (
-            "publish-native",
-            "publish-connect",
-            "publish-server-products",
-            "publish-testing",
-            "publish-sparkless",
+        self.assertEqual(
+            token_preflight.get("env", {}).get("PYPI_NEW_PROJECTS"),
+            "${{ vars.PYPI_NEW_PROJECTS }}",
         )
-        for name in existing_project_publishers:
+        self.assertIn("check_pypi_new_projects.py", token_preflight["run"])
+
+        publishers = {
+            "publish-native": ("sparkless-native",),
+            "publish-connect": ("sparkless-connect",),
+            "publish-server-products": (
+                "sparkless-server",
+                "sparkless-server-duckdb",
+            ),
+            "publish-testing": ("sparkless-testing",),
+            "publish-sparkless": ("sparkless",),
+        }
+        for name, projects in publishers.items():
             with self.subTest(publisher=name):
                 job = jobs[name]
                 self.assertEqual(job["permissions"].get("id-token"), "write")
                 self.assertEqual(job["environment"].get("name"), "pypi")
-                publish_step = next(
+                publish_steps = [
                     step
                     for step in job["steps"]
                     if step.get("uses", "").startswith("pypa/gh-action-pypi-publish@")
-                )
-                self.assertNotIn("password", publish_step.get("with", {}))
-                self.assertNotIn("attestations", publish_step.get("with", {}))
+                ]
+                for project in projects:
+                    with self.subTest(project=project):
+                        marker = f",{project},"
+                        token_step = next(
+                            step
+                            for step in publish_steps
+                            if marker in step.get("if", "")
+                            and "!contains" not in step.get("if", "")
+                        )
+                        trusted_step = next(
+                            step
+                            for step in publish_steps
+                            if marker in step.get("if", "")
+                            and "!contains" in step.get("if", "")
+                        )
+                        self.assertEqual(
+                            token_step.get("with", {}).get("password"),
+                            "${{ secrets.PYPI_API_TOKEN }}",
+                        )
+                        self.assertNotIn("password", trusted_step.get("with", {}))
+                        self.assertNotIn("attestations", trusted_step.get("with", {}))
 
         workflow_text = (ROOT / ".github/workflows/release.yml").read_text()
-        self.assertIn("vars.PYPI_NEW_PROJECTS == 'true'", workflow_text)
+        self.assertIn("vars.PYPI_NEW_PROJECTS", workflow_text)
         self.assertIn("${{ secrets.PYPI_API_TOKEN }}", workflow_text)
 
     def test_419_server_products_are_built_and_verified_separately(self):
@@ -303,6 +329,13 @@ class ReleaseWorkflowTests(unittest.TestCase):
         )
         self.assertIn("Dockerfile.release", container_build)
         self.assertIn("Dockerfile.duckdb.release", container_build)
+        container_publish = "\n".join(
+            step.get("run", "")
+            for step in jobs["publish-server-container"]["steps"]
+        )
+        self.assertIn("compare_published_files", container_publish)
+        self.assertIn("docker cp", container_publish)
+        self.assertIn("different release files", container_publish)
         dockerfile = (ROOT / "crates/sparkless-server/Dockerfile.release").read_text()
         duckdb_dockerfile = (
             ROOT / "crates/sparkless-server/Dockerfile.duckdb.release"

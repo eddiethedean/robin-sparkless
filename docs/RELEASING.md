@@ -137,15 +137,17 @@ and the workflows define the current release process.
 
 ## Credentials
 
-Rust publication needs `CARGO_REGISTRY_TOKEN`. The existing `sparkless` and
-`sparkless-native` projects use Trusted Publishing with owner `eddiethedean`,
-repository `robin-sparkless`, workflow `release.yml`, and environment `pypi`.
-The new `sparkless-testing`, `sparkless-connect`, `sparkless-server`, and
-`sparkless-server-duckdb` projects publish with the repository secret
-`PYPI_API_TOKEN`. Release metadata checks that the secret is present before
-starting Python publication. These token-backed uploads disable PyPI
-attestations; the OIDC jobs keep them enabled. The token must be account-scoped
-so it can create the new projects and upload to each one; see the
+Rust publication needs `CARGO_REGISTRY_TOKEN`. Existing PyPI projects use
+Trusted Publishing with owner `eddiethedean`, repository `robin-sparkless`,
+workflow `release.yml`, and environment `pypi`. To publish a project that has
+not yet been created on PyPI, set the repository variable `PYPI_NEW_PROJECTS`
+to a comma-separated list of exact project names, with no spaces. For example,
+`PYPI_NEW_PROJECTS=sparkless-testing,sparkless-server-duckdb` selects token
+authentication only for those projects; all other projects continue to use
+OIDC. Release metadata validates the list and requires the repository secret
+`PYPI_API_TOKEN` whenever the list is nonempty. Token-backed uploads disable
+PyPI attestations; OIDC uploads keep them enabled. The token must be
+account-scoped so it can create the listed projects and upload to each one; see the
 [PyPI API token guidance](https://docs.pypi.org/publishing/publishing-to-pypi/).
 All target projects must also be unarchived before a release; PyPI blocks new
 uploads to archived projects.

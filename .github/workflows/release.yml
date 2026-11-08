@@ -43,24 +43,22 @@ jobs:
         env:
           PUBLISH_RUST: ${{ inputs.publish_rust }}
         run: python scripts/release_context.py
-      # Existing projects use OIDC trusted publishing. Set the repository
-      # variable PYPI_NEW_PROJECTS=true when a release adds first-time projects;
-      # their dedicated publisher jobs must set password: ${{ secrets.PYPI_API_TOKEN }}.
+      # List first-time PyPI project names, comma-separated, in
+      # PYPI_NEW_PROJECTS. Those projects use the repository API token; all
+      # other projects use OIDC trusted publishing.
       - name: Require the PyPI API token for first-time projects
-        if: steps.context.outputs.publish_python == 'true' && vars.PYPI_NEW_PROJECTS == 'true'
+        if: steps.context.outputs.publish_python == 'true' && vars.PYPI_NEW_PROJECTS != ''
         env:
+          PYPI_NEW_PROJECTS: ${{ vars.PYPI_NEW_PROJECTS }}
           PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
-        run: |
-          if [[ -z "${PYPI_API_TOKEN:-}" ]]; then
-            echo 'PYPI_API_TOKEN GitHub Actions secret is required to publish new PyPI projects.'
-            exit 1
-          fi
+        run: python scripts/check_pypi_new_projects.py
       - name: Install release workflow test dependency
         run: python -m pip install PyYAML
       - name: Validate release workflow and publication policy
         run: python scripts/test_release_workflow.py
       - name: Verify release inventory and dependency gate unit tests
         run: |
+          python -m unittest discover -s scripts -p 'test_pypi_new_projects.py'
           python -m unittest discover -s scripts -p 'test_release_inventory.py'
           python -m unittest discover -s scripts -p 'test_server_feature_graphs.py'
           python -m unittest discover -s scripts -p 'test_verify_public_release_416.py'
@@ -1435,7 +1433,16 @@ jobs:
           path: dist
       - name: Verify native publisher bytes
         run: python scripts/verify_candidate_inventory.py --manifest candidate-inventory/candidate-inventory.json --directory dist --project sparkless-native
-      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+      - name: Publish native engine distributions with a GitHub PyPI token
+        if: ${{ contains(format(',{0},', vars.PYPI_NEW_PROJECTS), ',sparkless-native,') }}
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/
+          skip-existing: true
+          password: ${{ secrets.PYPI_API_TOKEN }}
+      - name: Publish native engine distributions with trusted publishing
+        if: ${{ !contains(format(',{0},', vars.PYPI_NEW_PROJECTS), ',sparkless-native,') }}
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: dist/
           skip-existing: true
@@ -1465,10 +1472,18 @@ jobs:
       - name: Verify shared launcher publisher bytes
         run: python scripts/verify_candidate_inventory.py --manifest candidate-inventory/candidate-inventory.json --directory dist --project sparkless-connect
       - name: Publish shared launcher distribution to PyPI
+        if: ${{ !contains(format(',{0},', vars.PYPI_NEW_PROJECTS), ',sparkless-connect,') }}
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: dist/
           skip-existing: true
+      - name: Publish shared launcher distribution with a GitHub PyPI token
+        if: ${{ contains(format(',{0},', vars.PYPI_NEW_PROJECTS), ',sparkless-connect,') }}
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/
+          skip-existing: true
+          password: ${{ secrets.PYPI_API_TOKEN }}
 
   publish-server-products:
     name: Publish base and DuckDB server projects to PyPI
@@ -1490,18 +1505,40 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: verified-server-base-candidate
-          path: dist
+          path: dist/base
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: verified-server-duckdb-candidate
-          path: dist
+          path: dist/duckdb
       - name: Verify both server product publisher bytes
         run: |
-          python scripts/verify_candidate_inventory.py --manifest candidate-inventory/candidate-inventory.json --directory dist --project sparkless-server --project sparkless-server-duckdb
-      - name: Publish both native server products to PyPI
+          python scripts/verify_candidate_inventory.py --manifest candidate-inventory/candidate-inventory.json --directory dist/base --project sparkless-server
+          python scripts/verify_candidate_inventory.py --manifest candidate-inventory/candidate-inventory.json --directory dist/duckdb --project sparkless-server-duckdb
+      - name: Publish base server project with a GitHub PyPI token
+        if: ${{ contains(format(',{0},', vars.PYPI_NEW_PROJECTS), ',sparkless-server,') }}
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
-          packages-dir: dist/
+          packages-dir: dist/base/
+          skip-existing: true
+          password: ${{ secrets.PYPI_API_TOKEN }}
+      - name: Publish base server project with trusted publishing
+        if: ${{ !contains(format(',{0},', vars.PYPI_NEW_PROJECTS), ',sparkless-server,') }}
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/base/
+          skip-existing: true
+      - name: Publish DuckDB server project with a GitHub PyPI token
+        if: ${{ contains(format(',{0},', vars.PYPI_NEW_PROJECTS), ',sparkless-server-duckdb,') }}
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/duckdb/
+          skip-existing: true
+          password: ${{ secrets.PYPI_API_TOKEN }}
+      - name: Publish DuckDB server project with trusted publishing
+        if: ${{ !contains(format(',{0},', vars.PYPI_NEW_PROJECTS), ',sparkless-server-duckdb,') }}
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/duckdb/
           skip-existing: true
 
   publish-testing:
@@ -1527,7 +1564,15 @@ jobs:
           path: dist
       - name: Verify standalone testing publisher bytes
         run: python scripts/verify_candidate_inventory.py --manifest candidate-inventory/candidate-inventory.json --directory dist --project sparkless-testing
-      - name: Publish sparkless-testing to PyPI
+      - name: Publish sparkless-testing with a GitHub PyPI token
+        if: ${{ contains(format(',{0},', vars.PYPI_NEW_PROJECTS), ',sparkless-testing,') }}
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/
+          skip-existing: true
+          password: ${{ secrets.PYPI_API_TOKEN }}
+      - name: Publish sparkless-testing with trusted publishing
+        if: ${{ !contains(format(',{0},', vars.PYPI_NEW_PROJECTS), ',sparkless-testing,') }}
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: dist/
@@ -1563,6 +1608,31 @@ jobs:
         id: publish
         run: |
           set -euo pipefail
+          compare_published_files() {
+            local product="$1"
+            local existing_container="$2"
+            local candidate_container="$3"
+            local paths=("/usr/local/bin/sparkless-server")
+            if [[ "$product" == duckdb ]]; then
+              paths=(
+                "/usr/local/bin/sparkless-server-duckdb"
+                "/usr/local/bin/quack.duckdb_extension"
+                "/usr/share/doc/sparkless-server-duckdb/NOTICE-quack.txt"
+              )
+            fi
+            local existing_dir="$RUNNER_TEMP/published-${product}"
+            local candidate_dir="$RUNNER_TEMP/candidate-${product}"
+            mkdir -p "$existing_dir" "$candidate_dir"
+            for path in "${paths[@]}"; do
+              local filename="$(basename "$path")"
+              docker cp "$existing_container:$path" "$existing_dir/"
+              docker cp "$candidate_container:$path" "$candidate_dir/"
+              if ! cmp -s "$existing_dir/$filename" "$candidate_dir/$filename"; then
+                echo "${product} image tag already has different release files (${path})." >&2
+                return 1
+              fi
+            done
+          }
           for product in base duckdb; do
             if [[ "$product" == base ]]; then
               source="sparkless-server:candidate-${GITHUB_SHA}"
@@ -1573,10 +1643,17 @@ jobs:
             fi
             docker tag "$source" "$target"
             if docker manifest inspect "$target" > "$RUNNER_TEMP/published-${product}-image.json" 2>/dev/null; then
-              existing="$(jq -r '.config.digest' "$RUNNER_TEMP/published-${product}-image.json")"
-              candidate="$(docker image inspect --format '{{.Id}}' "$source")"
-              if [[ "$existing" != "$candidate" ]]; then echo "${product} image tag already has different contents"; exit 1; fi
               docker pull "$target"
+              existing_container="$(docker create "$target")"
+              candidate_container="$(docker create "$source")"
+              cleanup_images() {
+                docker rm "${existing_container:-}" "${candidate_container:-}" >/dev/null 2>&1 || true
+              }
+              trap cleanup_images EXIT
+              compare_published_files "$product" "$existing_container" "$candidate_container"
+              cleanup_images
+              trap - EXIT
+              echo "Reusing existing ${product} image tag because its release files match the tested image."
             else
               docker push "$target"
             fi
@@ -1611,7 +1688,15 @@ jobs:
           path: candidate-inventory
       - name: Verify the API publisher bytes
         run: python scripts/verify_candidate_inventory.py --manifest candidate-inventory/candidate-inventory.json --directory dist --project sparkless
-      - name: Publish sparkless distributions to PyPI
+      - name: Publish sparkless distributions with a GitHub PyPI token
+        if: ${{ contains(format(',{0},', vars.PYPI_NEW_PROJECTS), ',sparkless,') }}
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/
+          skip-existing: true
+          password: ${{ secrets.PYPI_API_TOKEN }}
+      - name: Publish sparkless distributions with trusted publishing
+        if: ${{ !contains(format(',{0},', vars.PYPI_NEW_PROJECTS), ',sparkless,') }}
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: dist/
