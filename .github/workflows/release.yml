@@ -1304,7 +1304,9 @@ jobs:
             local response="$RUNNER_TEMP/${crate}-${crate_version}.json"
             local status
             if ! status=$(curl --silent --show-error --connect-timeout 10 --max-time 30 \
-              --retry 3 --retry-delay 2 --output "$response" --write-out '%{http_code}' \
+              --retry 3 --retry-delay 2 \
+              --user-agent 'robin-sparkless-release (https://github.com/eddiethedean/robin-sparkless)' \
+              --output "$response" --write-out '%{http_code}' \
               "https://crates.io/api/v1/crates/${crate}/${crate_version}"); then
               echo "Could not check crates.io for ${crate} ${crate_version}." >&2
               return 2

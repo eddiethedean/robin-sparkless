@@ -481,6 +481,10 @@ done
         self.assertIn(
             "https://crates.io/api/v1/crates/${crate}/${crate_version}", script
         )
+        self.assertIn(
+            "--user-agent 'robin-sparkless-release (https://github.com/eddiethedean/robin-sparkless)'",
+            script,
+        )
         self.assertLess(
             script.index('if crate_version_published "$crate"; then'),
             script.index("wait_seconds=$((last_new_publish + 300 - now))"),
